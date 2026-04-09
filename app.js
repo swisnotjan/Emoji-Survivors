@@ -905,7 +905,7 @@ const CLASS_DEFS = {
   wind: {
     id: "wind",
     icon: "\ud83c\udf2c\ufe0f",
-    playerEmoji: "ðŸ§ðŸ»â€â™‚ï¸",
+    playerEmoji: "\uD83E\uDDDD\uD83C\uDFFB\u200D\u2642\uFE0F",
     title: "Wind Mage",
     adjective: "Wind",
     description: "Fast control mage that wins by clearing space and shoving packs apart.",
@@ -929,7 +929,7 @@ const CLASS_DEFS = {
   frost: {
     id: "frost",
     icon: "\u2744\ufe0f",
-    playerEmoji: "ðŸ§™ðŸ»â€â™‚ï¸",
+    playerEmoji: "\uD83E\uDDD9\uD83C\uDFFB\u200D\u2642\uFE0F",
     title: "Frost Mage",
     adjective: "Frost",
     description: "Control mage that stacks chill into short freezes and brittle burst windows.",
@@ -953,7 +953,7 @@ const CLASS_DEFS = {
   fire: {
     id: "fire",
     icon: "\ud83d\udd25",
-    playerEmoji: "ðŸ«…ðŸ»",
+    playerEmoji: "\uD83E\uDEC5\uD83C\uDFFB",
     title: "Fire Mage",
     adjective: "Fire",
     description: "Area-denial mage that burns crowds down and turns chokepoints into kill zones.",
@@ -977,7 +977,7 @@ const CLASS_DEFS = {
   necro: {
     id: "necro",
     icon: "\ud83d\udc80",
-    playerEmoji: "ðŸ§ðŸ¿",
+    playerEmoji: "\uD83E\uDDDD\uD83C\uDFFF",
     title: "Necromancer",
     adjective: "Necrotic",
     description: "Durable attrition mage whose attacks pierce and whose thralls keep the frontline alive.",
@@ -1001,7 +1001,7 @@ const CLASS_DEFS = {
   blood: {
     id: "blood",
     icon: "\ud83e\ude78",
-    playerEmoji: "ðŸ§›ðŸ»",
+    playerEmoji: "\uD83E\uDDDB\uD83C\uDFFB",
     title: "Blood Mage",
     adjective: "Blood",
     description: "High-risk duelist that sustains through damage, crits hard, and spikes after dashing.",
@@ -7501,7 +7501,7 @@ function buildUnlockEnemyMarkup(requirement) {
     return "";
   }
   const enemyProfile = ENEMY_ARCHETYPES[requirement.enemyType];
-  const enemyEmoji = enemyProfile?.emoji ?? "â˜ ï¸";
+  const enemyEmoji = enemyProfile?.emoji ?? "\u2620\uFE0F";
   const currentKills = Math.min(requirement.enemyKills, metaProgress.unlockState.kills);
   return [
     `<div class="class-card-requirement">`,
@@ -7552,7 +7552,7 @@ function renderStartOverlay() {
   } else {
     const requirement = CLASS_UNLOCK_REQUIREMENTS[targetClassId];
     const enemyProfile = requirement.enemyType ? ENEMY_ARCHETYPES[requirement.enemyType] : null;
-    const enemyEmoji = enemyProfile?.emoji ?? "â˜ ï¸";
+    const enemyEmoji = enemyProfile?.emoji ?? "\u2620\uFE0F";
     classProgressCard.innerHTML = [
       `<div class="class-progress-head"><span class="class-progress-title">Next unlock: ${CLASS_DEFS[targetClassId].title}</span><strong>${CLASS_DEFS[targetClassId].icon}</strong></div>`,
       `<div class="class-progress-meta">`,
@@ -7756,7 +7756,7 @@ function renderUpgradesCodex() {
             ? "Maxed"
             : "Available"
         : skillState?.unlocked
-          ? `Unlocked â€¢ Mastery ${skillState.mastery}/2`
+          ? `Unlocked - Mastery ${skillState.mastery}/2`
           : `Unlocks at level ${unlockLevel}`,
     };
   });
@@ -9864,7 +9864,7 @@ function updateSkillHud() {
     card.fill.style.height = `${(progress * 100).toFixed(1)}%`;
     card.root.dataset.tooltipIcon = skillDef.icon;
     card.root.dataset.tooltipTitle = skillDef.title;
-    card.root.dataset.tooltipMeta = `Slot ${card.slot} â€¢ ${skillDef.role} â€¢ ${formatTargetingLabel(skillDef.targeting)}`;
+    card.root.dataset.tooltipMeta = `Slot ${card.slot} - ${skillDef.role} - ${formatTargetingLabel(skillDef.targeting)}`;
     card.root.dataset.tooltipBody = !skillState.unlocked
       ? `Unlocks at level ${unlockLevel}. ${SKILL_SUMMARIES[skillDef.id] ?? ""}`.trim()
       : `${SKILL_SUMMARIES[skillDef.id] ?? skillDef.title}. Cooldown ${cooldown.toFixed(1)}s.${skillState.mastery > 0 ? ` Mastery ${skillState.mastery}/2.` : ""}`;
@@ -12183,7 +12183,7 @@ window.debug_game = {
   spawnTrainingDummy(offsetX = 220, offsetY = 0) {
     const enemy = createEnemy("tank", { x: state.player.x + offsetX, y: state.player.y + offsetY }, 0, 1);
     enemy.isTrainingDummy = true;
-    enemy.emoji = "ðŸŽ¯";
+    enemy.emoji = "\uD83C\uDFAF";
     enemy.speed = 0;
     enemy.contactDamage = 0;
     enemy.maxHp = 999999;
