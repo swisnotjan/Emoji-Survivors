@@ -1,0 +1,10 @@
+node_modules/
+output/
+.dist-pages/
+
+tmp-actions*.json
+tmp-check-*.mjs
+tmp-console-*.mjs
+tmp-smoke-actions.json
+
+*.log

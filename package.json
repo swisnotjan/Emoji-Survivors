@@ -1,0 +1,16 @@
+{
+  "name": "emoji-survivors",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check app.js",
+    "pages:prepare": "node scripts/prepare-pages.mjs",
+    "serve": "node scripts/serve-static.mjs",
+    "playtest:smoke": "node scripts/run-playtest.mjs --page index.html --scenario smoke",
+    "playtest:skilllab": "node scripts/run-playtest.mjs --page skill-lab.html --scenario skilllab",
+    "verify:bosses": "node verify-boss-random-balance.mjs",
+    "verify:majors": "node verify-major-scaling.mjs",
+    "verify:telemetry": "node verify-telemetry-balance.mjs",
+    "search": "powershell -ExecutionPolicy Bypass -File scripts/search.ps1"
+  }
+}
