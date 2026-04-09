@@ -1817,6 +1817,46 @@ function getCurrentUnlockTargetId(meta = null) {
   return CLASS_ORDER.find((classId) => !(source.unlocked[classId] ?? false)) ?? null;
 }
 
+function reconcileMetaUnlocks(meta) {
+  if (!meta || typeof meta !== "object") {
+    return createDefaultMetaProgress();
+  }
+
+  let nextTargetId = getCurrentUnlockTargetId(meta);
+  while (nextTargetId) {
+    const requirement = CLASS_UNLOCK_REQUIREMENTS[nextTargetId];
+    const currentXp = Math.max(0, meta.unlockState?.targetClassId === nextTargetId ? meta.unlockState.xp ?? 0 : 0);
+    const currentKills = Math.max(0, meta.unlockState?.targetClassId === nextTargetId ? meta.unlockState.kills ?? 0 : 0);
+    const clampedXp = Math.min(requirement.xp, currentXp);
+    const clampedKills = Math.min(requirement.enemyKills, currentKills);
+
+    if (clampedXp < requirement.xp || clampedKills < requirement.enemyKills) {
+      meta.unlockState = {
+        targetClassId: nextTargetId,
+        xp: clampedXp,
+        kills: clampedKills,
+      };
+      return meta;
+    }
+
+    meta.unlocked[nextTargetId] = true;
+    meta.selectedClassId = nextTargetId;
+    meta.unlockState = {
+      targetClassId: null,
+      xp: 0,
+      kills: 0,
+    };
+    nextTargetId = getCurrentUnlockTargetId(meta);
+  }
+
+  meta.unlockState = {
+    targetClassId: null,
+    xp: 0,
+    kills: 0,
+  };
+  return meta;
+}
+
 function createDefaultMetaProgress() {
   const unlocked = {};
   for (const classId of CLASS_ORDER) {
@@ -1847,7 +1887,7 @@ function normalizeMetaProgress(candidate) {
   unlocked.wind = true;
   const selectedClassId = unlocked[candidate.selectedClassId] ? candidate.selectedClassId : "wind";
   const targetClassId = getCurrentUnlockTargetId({ unlocked }) ?? null;
-  return {
+  return reconcileMetaUnlocks({
     selectedClassId,
     unlocked,
     unlockState: {
@@ -1860,7 +1900,7 @@ function normalizeMetaProgress(candidate) {
       totalXpCollected: Math.max(0, candidate.lifetime?.totalXpCollected ?? 0),
       totalKills: Math.max(0, candidate.lifetime?.totalKills ?? 0),
     },
-  };
+  });
 }
 
 function loadMetaProgress() {
@@ -1877,6 +1917,7 @@ function loadMetaProgress() {
 
 function saveMetaProgress() {
   try {
+    metaProgress = reconcileMetaUnlocks(metaProgress);
     localStorage.setItem(META_STORAGE_KEY, JSON.stringify(metaProgress));
   } catch {
     // ignore storage errors in file:// or private contexts
@@ -7442,7 +7483,7 @@ function getUnlockProgressText(classId) {
   }
   const xp = `${Math.min(requirement.xp, metaProgress.unlockState.xp)} / ${requirement.xp} XP`;
   const kills = `${Math.min(requirement.enemyKills, metaProgress.unlockState.kills)} / ${requirement.enemyKills} ${requirement.enemyType} kills`;
-  return `${xp} â€¢ ${kills}`;
+  return `${xp} - ${kills}`;
 }
 
 function formatEnemyTypeLabel(enemyType) {
@@ -10052,16 +10093,11 @@ function applyRunMetaProgress() {
   metaProgress.unlockState.xp = Math.min(requirement.xp, metaProgress.unlockState.xp + Math.round(state.metaRun.xpCollected));
   metaProgress.unlockState.kills = Math.min(requirement.enemyKills, metaProgress.unlockState.kills + (state.killBreakdown[requirement.enemyType] ?? 0));
   if (metaProgress.unlockState.xp >= requirement.xp && metaProgress.unlockState.kills >= requirement.enemyKills) {
-    metaProgress.unlocked[targetClassId] = true;
-    metaProgress.selectedClassId = targetClassId;
-    const nextTargetId = getCurrentUnlockTargetId(metaProgress);
-    metaProgress.unlockState = {
-      targetClassId: nextTargetId,
-      xp: 0,
-      kills: 0,
-    };
+    const unlockedBefore = { ...metaProgress.unlocked };
+    metaProgress = reconcileMetaUnlocks(metaProgress);
+    const unlockedClassId = CLASS_ORDER.find((classId) => !unlockedBefore[classId] && metaProgress.unlocked[classId]) ?? targetClassId;
     saveMetaProgress();
-    return targetClassId;
+    return unlockedClassId;
   }
   saveMetaProgress();
   return null;

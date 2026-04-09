@@ -1509,3 +1509,14 @@ ode verify-class-boss-focus.mjs passes and confirms locked class cards show enem
 - Default menu verification confirms all 5 classes render, `blood` is visible, and only `frost` shows real requirements:
   - `output/web-game/verify-class-visibility/checks.json`
   - `output/web-game/verify-class-visibility/menu.png`
+## Update: unlock reconciliation fix
+- Added `reconcileMetaUnlocks(meta)` so completed class requirements unlock immediately on load/save instead of waiting for one more finished run.
+- Synced unlock thresholds to `GAME_CONFIG.classUnlockRequirements` inside `app.js`, removing stale legacy values from the UI/meta flow.
+- Start menu now shows all mage cards; only the next unlock target shows active requirements, later classes show a previous-class gate message.
+- Replaced broken bullet separator in unlock progress text with a plain hyphen.
+
+## Latest verification
+- `npm run check` passes.
+- `npm run playtest:smoke` passes.
+- Targeted meta restore test confirms `Necro` auto-unlocks when stored progress already satisfies its requirement:
+  - `output/web-game/verify-unlock-reconcile/checks.json`
