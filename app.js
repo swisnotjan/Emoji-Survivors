@@ -20,6 +20,10 @@ const WORLD_FEATURE_MARGIN = 280;
 const WORLD_FEATURE_START_CLEAR_RADIUS = 760;
 const WORLD_FEATURE_CACHE = new Map();
 const TERRAIN_TILE_CACHE = new Map();
+const PARTICLE_SPRITE_CACHE = new Map();
+const SOFT_BURST_SPRITE_CACHE = new Map();
+const TERRAIN_CACHE_CANVAS = document.createElement("canvas");
+const TERRAIN_CACHE_CTX = TERRAIN_CACHE_CANVAS.getContext("2d", { alpha: false });
 const GAME_CONFIG = window.GAME_CONFIG ?? {};
 const TERRAIN_PALETTE = GAME_CONFIG.terrainPalette ?? {
   grass: ["#1e4131", "#2b5642", "#3a6953"],
@@ -901,6 +905,27 @@ const STATUS_PRIORITY = {
   necro: 5,
   blood: 6,
 };
+
+function getEnemyPrimaryStatus(enemy) {
+  const statusVisuals = [
+    { key: "freeze", value: Math.max(enemy.freezeTimer, enemy.statusFlash.freeze), hue: 190, aura: "rgba(122, 212, 255, {a})" },
+    { key: "burn", value: Math.max(enemy.burnTimer * 0.25, enemy.statusFlash.burn), hue: 18, aura: "rgba(255, 154, 68, {a})" },
+    { key: "chill", value: Math.max(enemy.slowTimer * 0.3, enemy.statusFlash.chill), hue: 180, aura: "rgba(102, 196, 255, {a})" },
+    { key: "necro", value: Math.max(enemy.necroMarkTimer, enemy.statusFlash.necro), hue: 255, aura: "rgba(196, 142, 255, {a})" },
+    { key: "blood", value: Math.max(enemy.bloodMarkTimer, enemy.statusFlash.blood), hue: 334, aura: "rgba(255, 96, 138, {a})" },
+    { key: "wind", value: enemy.statusFlash.wind, hue: 0, aura: "rgba(255, 255, 255, {a})" },
+  ];
+  return statusVisuals.reduce((best, item) => {
+    if (item.value <= 0) {
+      return best;
+    }
+    if (!best) {
+      return item;
+    }
+    return (STATUS_PRIORITY[item.key] ?? 0) >= (STATUS_PRIORITY[best.key] ?? 0) ? item : best;
+  }, null);
+}
+
 const CLASS_DEFS = {
   wind: {
     id: "wind",
@@ -2189,6 +2214,17 @@ function getEligibleBossTypes(atTime = state?.elapsed ?? 0) {
 }
 
 let backgroundGradient = null;
+let screenVignetteGradient = null;
+let hurtVignetteGradient = null;
+let deathWashGradient = null;
+let terrainRenderCache = {
+  zoom: null,
+  startWorldX: null,
+  startWorldY: null,
+  endWorldX: null,
+  endWorldY: null,
+  waterTiles: [],
+};
 let metaProgress = loadMetaProgress();
 let telemetryStore = loadTelemetryStore();
 let state = createInitialState(metaProgress.selectedClassId);
@@ -2206,6 +2242,7 @@ requestAnimationFrame(gameLoop);
 function createInitialState(classId = "wind") {
   WORLD_FEATURE_CACHE.clear();
   TERRAIN_TILE_CACHE.clear();
+  invalidateBackgroundCache();
   const worldSeed = Math.floor(Math.random() * 2147483647);
   const classDef = CLASS_DEFS[classId] ?? CLASS_DEFS.wind;
   const baseSpeed = 220 * classDef.speedMultiplier;
@@ -2258,6 +2295,7 @@ function createInitialState(classId = "wind") {
       playerBarShakeTimer: 0,
       bossBarShakeTimer: 0,
     },
+    hudPendingForce: false,
     player: {
       classId,
       x: 0,
@@ -2414,6 +2452,8 @@ function createInitialState(classId = "wind") {
     enemyGrid: {
       map: new Map(),
       cells: [],
+      typeCounts: Object.create(null),
+      bossCount: 0,
     },
     pickupDirector: {
       healTimer: randRange(8.5, 12.5),
@@ -2424,10 +2464,15 @@ function createInitialState(classId = "wind") {
       unlockedClassThisRun: null,
     },
     telemetry: createRunTelemetry(classId),
+    queryCache: {
+      tick: -1,
+      values: new Map(),
+    },
     performance: {
       fpsDisplay: 0,
       fpsSmooth: 60,
       fpsTimer: 0,
+      tier: 0,
     },
   };
 }
@@ -2646,10 +2691,54 @@ function resizeCanvas() {
 
   canvas.width = viewWidth;
   canvas.height = viewHeight;
+  invalidateBackgroundCache();
 
   backgroundGradient = ctx.createLinearGradient(0, 0, 0, viewHeight);
   backgroundGradient.addColorStop(0, "#102520");
   backgroundGradient.addColorStop(1, "#1f392f");
+
+  screenVignetteGradient = ctx.createRadialGradient(
+    viewWidth * 0.5,
+    viewHeight * 0.5,
+    Math.min(viewWidth, viewHeight) * 0.12,
+    viewWidth * 0.5,
+    viewHeight * 0.5,
+    Math.max(viewWidth, viewHeight) * 0.78
+  );
+  screenVignetteGradient.addColorStop(0, "rgba(0, 0, 0, 0)");
+  screenVignetteGradient.addColorStop(1, "rgba(2, 8, 7, 1)");
+
+  hurtVignetteGradient = ctx.createRadialGradient(
+    viewWidth * 0.5,
+    viewHeight * 0.5,
+    Math.min(viewWidth, viewHeight) * 0.18,
+    viewWidth * 0.5,
+    viewHeight * 0.5,
+    Math.max(viewWidth, viewHeight) * 0.72
+  );
+  hurtVignetteGradient.addColorStop(0, "rgba(0, 0, 0, 0)");
+  hurtVignetteGradient.addColorStop(0.72, "rgba(120, 20, 22, 0.58)");
+  hurtVignetteGradient.addColorStop(1, "rgba(196, 22, 28, 1)");
+
+  deathWashGradient = ctx.createLinearGradient(0, 0, 0, viewHeight);
+  deathWashGradient.addColorStop(0, "rgba(255, 124, 124, 1)");
+  deathWashGradient.addColorStop(1, "rgba(118, 18, 24, 1)");
+}
+
+function invalidateBackgroundCache() {
+  terrainRenderCache.zoom = null;
+  terrainRenderCache.startWorldX = null;
+  terrainRenderCache.startWorldY = null;
+  terrainRenderCache.endWorldX = null;
+  terrainRenderCache.endWorldY = null;
+  terrainRenderCache.waterTiles = [];
+}
+
+function requestHudRefresh(force = false) {
+  state.hudTimer = 0;
+  if (force) {
+    state.hudPendingForce = true;
+  }
 }
 
 function actionFromEvent(event) {
@@ -2699,6 +2788,7 @@ function updateFps(frameTime) {
 
   perf.fpsTimer = 0.22;
   perf.fpsDisplay = Math.max(0, Math.round(perf.fpsSmooth));
+  perf.tier = getPerformanceTier();
   const label = `FPS ${perf.fpsDisplay}`;
   if (state.hudCache.fps !== label) {
     state.hudCache.fps = label;
@@ -2706,16 +2796,29 @@ function updateFps(frameTime) {
   }
 }
 
-function getFxTier() {
+function getPerformanceTier() {
   const perf = state.performance;
-  const loadScore = state.enemies.length * 0.9 + state.effects.length * 1.35 + state.projectiles.length * 0.8;
+  const loadScore =
+    state.enemies.length * 1 +
+    state.effects.length * 1.4 +
+    state.projectiles.length * 0.85 +
+    state.enemyAttacks.length * 1.15 +
+    state.damageNumbers.length * 0.4 +
+    state.allies.length * 0.75;
+  if (perf.fpsSmooth < 30 || loadScore > 340) {
+    return 3;
+  }
   if (perf.fpsSmooth < 42 || loadScore > 250) {
     return 2;
   }
-  if (perf.fpsSmooth < 54 || loadScore > 160) {
+  if (perf.fpsSmooth < 54 || loadScore > 170) {
     return 1;
   }
   return 0;
+}
+
+function getFxTier() {
+  return Math.min(2, getPerformanceTier());
 }
 
 function scaleFxCount(count) {
@@ -2767,7 +2870,8 @@ function update(dt) {
   state.hudTimer -= dt;
   if (state.hudTimer <= 0) {
     state.hudTimer = 0.08;
-    updateHud(false);
+    updateHud(state.hudPendingForce);
+    state.hudPendingForce = false;
   }
 }
 
@@ -2995,12 +3099,22 @@ function updatePickups(dt) {
       continue;
     }
 
-    pickup.life -= dt;
     pickup.floatTime += dt;
     pickup.spawnTimer = Math.max(0, (pickup.spawnTimer ?? 0) - dt);
     pickup.absorbTimer = Math.max(0, pickup.absorbTimer ?? 0);
+    pickup.expireTimer = Math.max(0, pickup.expireTimer ?? 0);
+
+    if (pickup.expiring) {
+      pickup.expireTimer -= dt;
+      if (pickup.expireTimer <= 0) {
+        pickup.dead = true;
+      }
+      continue;
+    }
+
+    pickup.life -= dt;
     if (pickup.life <= 0) {
-      pickup.dead = true;
+      beginPickupExpire(pickup);
       continue;
     }
 
@@ -3023,6 +3137,11 @@ function updatePickups(dt) {
       continue;
     }
 
+    if (shouldAutoAbsorbPickup(pickup, player)) {
+      beginPickupAbsorb(pickup);
+      continue;
+    }
+
     const collectPadding = pickup.type === "xp-orb" ? 18 : pickup.type === "xp-cache" ? 20 : pickup.type === "heal" ? 18 : 5;
     if (circlesOverlap(player.x, player.y, player.radius, pickup.x, pickup.y, pickup.radius + collectPadding)) {
       if (isMagneticPickup(pickup)) {
@@ -3038,44 +3157,131 @@ function isMagneticPickup(pickup) {
   return pickup.type === "xp-orb" || pickup.type === "xp-cache" || pickup.type === "heal";
 }
 
+function isXpPickup(pickup) {
+  return pickup.type === "xp-orb" || pickup.type === "xp-cache";
+}
+
+function getPickupMotionProfile(pickup, player = state.player) {
+  const magnetBonus = player.pickupMagnetRadius ?? 0;
+  if (pickup.type === "xp-cache") {
+    return {
+      magnetRadius: 272 + magnetBonus,
+      basePull: 620,
+      curvePull: 1720,
+      closePull: 2800,
+      drag: 6.9,
+      maxSpeed: 980,
+      absorbCommitRadius: 78 + magnetBonus * 0.24,
+      nearDuration: 0.085,
+      farDuration: 0.18,
+      collectEarly: true,
+    };
+  }
+  if (pickup.type === "xp-orb") {
+    return {
+      magnetRadius: 214 + magnetBonus,
+      basePull: 560,
+      curvePull: 1440,
+      closePull: 2450,
+      drag: 6.7,
+      maxSpeed: 860,
+      absorbCommitRadius: 58 + magnetBonus * 0.2,
+      nearDuration: 0.068,
+      farDuration: 0.135,
+      collectEarly: true,
+    };
+  }
+  return {
+    magnetRadius: 220 + magnetBonus,
+    basePull: 520,
+    curvePull: 1260,
+    closePull: 980,
+    drag: 7.5,
+    maxSpeed: 780,
+    absorbCommitRadius: 0,
+    nearDuration: 0.09,
+    farDuration: 0.18,
+    collectEarly: false,
+  };
+}
+
 function updateMagneticPickupMotion(pickup, player, dt) {
-  pickup.vx = (pickup.vx ?? 0) * Math.exp(-7.5 * dt);
-  pickup.vy = (pickup.vy ?? 0) * Math.exp(-7.5 * dt);
+  const profile = getPickupMotionProfile(pickup, player);
+  pickup.vx = (pickup.vx ?? 0) * Math.exp(-profile.drag * dt);
+  pickup.vy = (pickup.vy ?? 0) * Math.exp(-profile.drag * dt);
 
   const dx = player.x - pickup.x;
   const dy = player.y - pickup.y;
   const distance = Math.hypot(dx, dy) || 1;
-  const magnetBonus = player.pickupMagnetRadius ?? 0;
-  const magnetRadius = (pickup.type === "xp-cache" ? 240 : pickup.type === "heal" ? 220 : 190) + magnetBonus;
-  if (distance <= magnetRadius) {
-    const distanceFactor = 1 - distance / magnetRadius;
-    const pull =
-      520 +
-      distanceFactor * distanceFactor *
-        (pickup.type === "xp-cache" ? 1480 : pickup.type === "heal" ? 1260 : 1180);
+  if (distance <= profile.magnetRadius) {
+    const distanceFactor = 1 - distance / profile.magnetRadius;
+    const curvedFactor = distanceFactor * distanceFactor;
+    const closeFactor = curvedFactor * curvedFactor;
+    const pull = profile.basePull + curvedFactor * profile.curvePull + closeFactor * profile.closePull;
     pickup.vx += (dx / distance) * pull * dt;
     pickup.vy += (dy / distance) * pull * dt;
+    const speed = Math.hypot(pickup.vx, pickup.vy);
+    const maxSpeed = profile.maxSpeed + closeFactor * 320;
+    if (speed > maxSpeed) {
+      const speedScale = maxSpeed / Math.max(1, speed);
+      pickup.vx *= speedScale;
+      pickup.vy *= speedScale;
+    }
   }
 
   pickup.x += pickup.vx * dt;
   pickup.y += pickup.vy * dt;
 }
 
+function shouldAutoAbsorbPickup(pickup, player) {
+  if (!isXpPickup(pickup) || pickup.absorbing || pickup.expiring) {
+    return false;
+  }
+  const profile = getPickupMotionProfile(pickup, player);
+  if (profile.absorbCommitRadius <= 0) {
+    return false;
+  }
+  return circlesOverlap(
+    player.x,
+    player.y,
+    player.radius + profile.absorbCommitRadius,
+    pickup.x,
+    pickup.y,
+    pickup.radius
+  );
+}
+
 function beginPickupAbsorb(pickup) {
-  if (pickup.absorbing) {
-    return;
+  if (pickup.absorbing || pickup.expiring) {
+    return false;
   }
   pickup.absorbing = true;
   pickup.absorbStartX = pickup.x;
   pickup.absorbStartY = pickup.y;
   const distance = Math.hypot(state.player.x - pickup.x, state.player.y - pickup.y);
-  const normalized = clamp(distance / 180, 0, 1);
-  const farDuration = pickup.type === "xp-cache" ? 0.2 : pickup.type === "heal" ? 0.18 : 0.15;
-  const nearDuration = pickup.type === "xp-cache" ? 0.1 : pickup.type === "heal" ? 0.09 : 0.07;
-  pickup.absorbDuration = lerp(nearDuration, farDuration, normalized);
+  const profile = getPickupMotionProfile(pickup);
+  const normalized = clamp(distance / Math.max(1, profile.magnetRadius * 0.72), 0, 1);
+  pickup.absorbDuration = lerp(profile.nearDuration, profile.farDuration, normalized);
   pickup.absorbTimer = pickup.absorbDuration;
   pickup.vx = 0;
   pickup.vy = 0;
+  if (profile.collectEarly && !pickup.claimed) {
+    pickup.claimed = true;
+    grantExperience(pickup.xpAmount);
+  }
+  return true;
+}
+
+function beginPickupExpire(pickup) {
+  if (pickup.expiring || pickup.dead || pickup.absorbing) {
+    return false;
+  }
+  pickup.expiring = true;
+  pickup.expireDuration = pickup.type === "xp-cache" ? 0.28 : pickup.type === "xp-orb" ? 0.24 : 0.26;
+  pickup.expireTimer = pickup.expireDuration;
+  pickup.vx = 0;
+  pickup.vy = 0;
+  return true;
 }
 
 function spawnHealPickup() {
@@ -3288,17 +3494,30 @@ function collectHealPickup(pickup) {
 function collectXpPickup(pickup) {
   pickup.dead = true;
   spawnXpPickupEffect(pickup.x, pickup.y, pickup.type === "xp-cache" ? 1.22 : 0.86);
-  grantExperience(pickup.xpAmount);
+  if (!pickup.claimed) {
+    grantExperience(pickup.xpAmount);
+  }
   updateHud(false);
 }
 
 function findNearestEnemy(originX, originY, maxRange = Number.POSITIVE_INFINITY, predicate = null) {
+  const cacheKey = !predicate && Number.isFinite(maxRange)
+    ? buildQueryKey("nearest", originX, originY, maxRange)
+    : null;
+  const queryCache = cacheKey ? getFrameQueryCache() : null;
+  if (queryCache?.has(cacheKey)) {
+    const cached = queryCache.get(cacheKey);
+    if (!cached || !cached.dead) {
+      return cached;
+    }
+    queryCache.delete(cacheKey);
+  }
+
   let nearest = null;
   let nearestDistanceSq = maxRange * maxRange;
-
-  for (const enemy of state.enemies) {
-    if (enemy.dead || (predicate && !predicate(enemy))) {
-      continue;
+  visitEnemiesInRange(originX, originY, maxRange, (enemy) => {
+    if (predicate && !predicate(enemy)) {
+      return;
     }
 
     const dx = enemy.x - originX;
@@ -3309,45 +3528,54 @@ function findNearestEnemy(originX, originY, maxRange = Number.POSITIVE_INFINITY,
       nearestDistanceSq = distanceSq;
       nearest = enemy;
     }
-  }
+  });
 
+  if (queryCache) {
+    queryCache.set(cacheKey, nearest);
+  }
   return nearest;
 }
 
 function findDensestEnemyCluster(originX, originY, radius = 220, maxRange = 820) {
+  const cacheKey = buildQueryKey("cluster", originX, originY, maxRange, radius);
+  const queryCache = getFrameQueryCache();
+  if (queryCache.has(cacheKey)) {
+    return queryCache.get(cacheKey);
+  }
+
   let best = null;
   let bestScore = -1;
   const radiusSq = radius * radius;
   const maxRangeSq = maxRange * maxRange;
-
-  for (const anchor of state.enemies) {
-    if (anchor.dead) {
-      continue;
+  const anchors = [];
+  visitEnemiesInRange(originX, originY, maxRange, (enemy) => {
+    const originDx = enemy.x - originX;
+    const originDy = enemy.y - originY;
+    if (originDx * originDx + originDy * originDy <= maxRangeSq) {
+      anchors.push(enemy);
     }
-    const originDx = anchor.x - originX;
-    const originDy = anchor.y - originY;
-    if (originDx * originDx + originDy * originDy > maxRangeSq) {
-      continue;
-    }
+  });
 
+  const perfTier = getPerformanceTier();
+  const anchorStride = perfTier >= 3 ? 4 : perfTier >= 2 ? 3 : perfTier >= 1 ? 2 : 1;
+  for (let index = 0; index < anchors.length; index += anchorStride) {
+    const anchor = anchors[index];
     let score = 0;
     let centerX = 0;
     let centerY = 0;
-    for (const enemy of state.enemies) {
-      if (enemy.dead) {
-        continue;
-      }
+
+    visitEnemiesInRange(anchor.x, anchor.y, radius, (enemy) => {
       const dx = enemy.x - anchor.x;
       const dy = enemy.y - anchor.y;
       const distanceSq = dx * dx + dy * dy;
       if (distanceSq > radiusSq) {
-        continue;
+        return;
       }
       const weight = 1 + Math.max(0, 1 - Math.sqrt(distanceSq) / radius) * 1.4 + enemy.radius * 0.03;
       score += weight;
       centerX += enemy.x * weight;
       centerY += enemy.y * weight;
-    }
+    });
 
     if (score > bestScore && score > 0) {
       bestScore = score;
@@ -3359,6 +3587,7 @@ function findDensestEnemyCluster(originX, originY, radius = 220, maxRange = 820)
     }
   }
 
+  queryCache.set(cacheKey, best);
   return best;
 }
 
@@ -4090,6 +4319,9 @@ function countLivingEnemiesOfType(enemyType) {
 }
 
 function hasLivingBoss() {
+  if (state.enemyGrid) {
+    return (state.enemyGrid.bossCount ?? 0) > 0;
+  }
   return state.enemies.some((enemy) => !enemy.dead && enemy.isBoss);
 }
 
@@ -5543,6 +5775,8 @@ function holdEnemyBand(enemy, player, innerRadius, outerRadius, speed, dt) {
 function buildEnemyGrid(enemies) {
   const map = new Map();
   const cells = [];
+  const typeCounts = Object.create(null);
+  let bossCount = 0;
 
   for (const enemy of enemies) {
     if (enemy.dead) {
@@ -5561,9 +5795,62 @@ function buildEnemyGrid(enemies) {
     }
 
     cell.enemies.push(enemy);
+    typeCounts[enemy.type] = (typeCounts[enemy.type] ?? 0) + 1;
+    if (enemy.isBoss) {
+      bossCount += 1;
+    }
   }
 
-  return { map, cells };
+  return { map, cells, typeCounts, bossCount };
+}
+
+function visitEnemiesInRange(originX, originY, range, visitor) {
+  const grid = state.enemyGrid;
+  if (!grid || grid.map.size === 0 || !Number.isFinite(range)) {
+    for (const enemy of state.enemies) {
+      if (!enemy.dead) {
+        visitor(enemy);
+      }
+    }
+    return;
+  }
+
+  const minCellX = Math.floor((originX - range) / ENEMY_CELL_SIZE);
+  const maxCellX = Math.floor((originX + range) / ENEMY_CELL_SIZE);
+  const minCellY = Math.floor((originY - range) / ENEMY_CELL_SIZE);
+  const maxCellY = Math.floor((originY + range) / ENEMY_CELL_SIZE);
+
+  for (let cellY = minCellY; cellY <= maxCellY; cellY += 1) {
+    for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+      const cell = grid.map.get(cellKey(cellX, cellY));
+      if (!cell) {
+        continue;
+      }
+      for (const enemy of cell.enemies) {
+        if (!enemy.dead) {
+          visitor(enemy);
+        }
+      }
+    }
+  }
+}
+
+function getFrameQueryCache() {
+  if (state.queryCache.tick !== state.tick) {
+    state.queryCache.tick = state.tick;
+    state.queryCache.values.clear();
+  }
+  return state.queryCache.values;
+}
+
+function buildQueryKey(kind, originX, originY, range, extra = "") {
+  return [
+    kind,
+    Math.round(originX),
+    Math.round(originY),
+    Math.round(range),
+    extra,
+  ].join(":");
 }
 
 function updateAllies(dt) {
@@ -5774,20 +6061,20 @@ function applyEnemyHaste(enemy, amount, duration) {
 
 function empowerNearbyEnemies(source, radius, amount, duration, includeBosses = false) {
   const radiusSq = radius * radius;
-  for (const enemy of state.enemies) {
+  visitEnemiesInRange(source.x, source.y, radius, (enemy) => {
     if (enemy.dead || enemy.id === source.id) {
-      continue;
+      return;
     }
     if (enemy.isBoss && !includeBosses) {
-      continue;
+      return;
     }
     const dx = enemy.x - source.x;
     const dy = enemy.y - source.y;
     if (dx * dx + dy * dy > radiusSq) {
-      continue;
+      return;
     }
     applyEnemyHaste(enemy, amount, duration);
-  }
+  });
   applyEnemyHaste(source, amount * 0.8, duration);
   pushEffect({
     kind: "ring",
@@ -5909,6 +6196,14 @@ function getDamageNumberColor(source) {
 }
 
 function spawnDamageNumber(x, y, amount, source) {
+  const perfTier = getPerformanceTier();
+  if (perfTier >= 3) {
+    return;
+  }
+  const cap = perfTier >= 2 ? 18 : perfTier >= 1 ? 30 : 52;
+  if (state.damageNumbers.length >= cap) {
+    state.damageNumbers.splice(0, state.damageNumbers.length - (cap - 1));
+  }
   state.damageNumbers.push({
     id: state.nextEntityId++,
     x: x + randRange(-8, 8),
@@ -6057,16 +6352,16 @@ function onEnemyDefeated(enemy, source = "unknown") {
     state.player.hp = Math.min(state.player.maxHp, state.player.hp + state.player.onKillHeal);
   }
   if (state.player.classId === "fire" && enemy.burnTimer > 0) {
-    for (const nearby of state.enemies) {
+    visitEnemiesInRange(enemy.x, enemy.y, 150, (nearby) => {
       if (nearby.dead || nearby.id === enemy.id) {
-        continue;
+        return;
       }
       const distance = Math.hypot(nearby.x - enemy.x, nearby.y - enemy.y);
       if (distance > 150) {
-        continue;
+        return;
       }
       applyEnemyBurn(nearby, nearby.isBoss ? 5 : 8, 2.2);
-    }
+    });
   }
   maybeRaiseThrall(enemy);
   if (enemy.isBoss) {
@@ -6214,6 +6509,25 @@ function updateEffects(dt) {
       effect.y = state.player.y + (effect.followOffsetY ?? 0);
     }
 
+    if (effect.kind === "particle-burst") {
+      let aliveCount = 0;
+      let maxParticleLife = 0;
+      for (const particle of effect.particles) {
+        particle.life -= dt;
+        if (particle.life <= 0) {
+          continue;
+        }
+        particle.x += particle.vx * dt;
+        particle.y += particle.vy * dt;
+        particle.vx *= Math.exp(-4.4 * dt);
+        particle.vy *= Math.exp(-4.4 * dt);
+        aliveCount += 1;
+        maxParticleLife = Math.max(maxParticleLife, particle.life);
+      }
+      effect.life = aliveCount > 0 ? maxParticleLife : 0;
+      continue;
+    }
+
     if (effect.kind === "spark" || effect.kind === "ember") {
       effect.x += effect.vx * dt;
       effect.y += effect.vy * dt;
@@ -6239,16 +6553,16 @@ function updateEffects(dt) {
       }
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
-        for (const enemy of state.enemies) {
+        visitEnemiesInRange(effect.x, effect.y, effect.radius + 48, (enemy) => {
           if (enemy.dead) {
-            continue;
+            return;
           }
           const distance = Math.hypot(enemy.x - effect.x, enemy.y - effect.y);
           if (distance > effect.radius + enemy.radius) {
-            continue;
+            return;
           }
           applyZoneTick(effect, enemy, 1 - Math.min(0.55, distance / Math.max(1, effect.radius) * 0.35));
-        }
+        });
       }
       continue;
     }
@@ -6258,12 +6572,12 @@ function updateEffects(dt) {
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
         const { currentLength, currentWidth, centerX, centerY } = getCrosswindMetrics(effect, clamp(effect.life / effect.maxLife, 0, 1));
-        for (const enemy of state.enemies) {
+        visitEnemiesInRange(centerX, centerY, Math.max(currentLength, currentWidth) * 0.6 + 48, (enemy) => {
           if (enemy.dead) {
-            continue;
+            return;
           }
           if (!pointInRotatedRect(enemy.x, enemy.y, centerX, centerY, effect.angle, currentLength * 0.5, currentWidth * 0.5 + enemy.radius)) {
-            continue;
+            return;
           }
           applyZoneTick(effect, enemy, 1);
           const sidewaysX = -Math.sin(effect.angle);
@@ -6271,7 +6585,7 @@ function updateEffects(dt) {
           const side = Math.sign((enemy.x - effect.x) * sidewaysX + (enemy.y - effect.y) * sidewaysY) || 1;
           enemy.knockbackVX += sidewaysX * side * 260;
           enemy.knockbackVY += sidewaysY * side * 260;
-        }
+        });
       }
       continue;
     }
@@ -6280,21 +6594,21 @@ function updateEffects(dt) {
       effect.tickTimer -= dt;
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
-        for (const enemy of state.enemies) {
+        visitEnemiesInRange(effect.x, effect.y, effect.radius + 48, (enemy) => {
           if (enemy.dead) {
-            continue;
+            return;
           }
           const dx = effect.x - enemy.x;
           const dy = effect.y - enemy.y;
           const distance = Math.hypot(dx, dy);
           if (distance > effect.radius + enemy.radius) {
-            continue;
+            return;
           }
           applyZoneTick(effect, enemy, 1);
           const pull = 120 + (1 - distance / Math.max(1, effect.radius)) * 220;
           enemy.knockbackVX += (dx / Math.max(1, distance)) * pull;
           enemy.knockbackVY += (dy / Math.max(1, distance)) * pull;
-        }
+        });
       }
       continue;
     }
@@ -6303,13 +6617,13 @@ function updateEffects(dt) {
       effect.armTime -= dt;
       if (!effect.burstDone && effect.armTime <= 0) {
         effect.burstDone = true;
-        for (const enemy of state.enemies) {
+        visitEnemiesInRange(effect.x, effect.y, effect.radius + 48, (enemy) => {
           if (enemy.dead) {
-            continue;
+            return;
           }
           const distance = Math.hypot(enemy.x - effect.x, enemy.y - effect.y);
           if (distance > effect.radius + enemy.radius) {
-            continue;
+            return;
           }
           applyZoneTick(effect, enemy, 1);
           if (effect.kind === "permafrost-seal") {
@@ -6317,7 +6631,7 @@ function updateEffects(dt) {
           } else {
             applyEnemyBurn(enemy, enemy.isBoss ? 15 : 22, 4.2);
           }
-        }
+        });
         if (effect.kind === "ash-comet") {
           pushEffect({
             kind: "sunspot",
@@ -6341,16 +6655,16 @@ function updateEffects(dt) {
       effect.tickTimer -= dt;
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
-        for (const enemy of state.enemies) {
+        visitEnemiesInRange(effect.x, effect.y, effect.radius + 48, (enemy) => {
           if (enemy.dead) {
-            continue;
+            return;
           }
           const distance = Math.hypot(enemy.x - effect.x, enemy.y - effect.y);
           if (distance > effect.radius + enemy.radius) {
-            continue;
+            return;
           }
           applyZoneTick(effect, enemy, 1);
-        }
+        });
       }
       continue;
     }
@@ -6364,13 +6678,13 @@ function updateEffects(dt) {
           const angle = progress * 24.6 + (orb / effect.orbitCount) * Math.PI * 2;
           const orbX = effect.x + Math.cos(angle) * effect.radius;
           const orbY = effect.y + Math.sin(angle) * effect.radius;
-          for (const enemy of state.enemies) {
+          visitEnemiesInRange(orbX, orbY, 36, (enemy) => {
             if (enemy.dead || !circlesOverlap(orbX, orbY, 18, enemy.x, enemy.y, enemy.radius)) {
-              continue;
+              return;
             }
             applyZoneTick(effect, enemy, 1);
             applyEnemyNecroMark(enemy);
-          }
+          });
         }
       }
       continue;
@@ -6379,14 +6693,14 @@ function updateEffects(dt) {
     if (effect.kind === "holy-wave") {
       const progress = 1 - effect.life / effect.maxLife;
       const radius = effect.size + progress * effect.growth;
-      for (const enemy of state.enemies) {
+      visitEnemiesInRange(effect.x, effect.y, radius + effect.thickness + 36, (enemy) => {
         if (enemy.dead || effect.hitIds.has(enemy.id)) {
-          continue;
+          return;
         }
 
         const distance = Math.hypot(enemy.x - effect.x, enemy.y - effect.y);
         if (Math.abs(distance - radius) > enemy.radius + effect.thickness) {
-          continue;
+          return;
         }
 
         effect.hitIds.add(enemy.id);
@@ -6397,7 +6711,7 @@ function updateEffects(dt) {
         enemy.slowTimer = Math.max(enemy.slowTimer, 0.32);
         spawnHitEffect(enemy.x, enemy.y, "holy", enemy.x - effect.x, enemy.y - effect.y);
         dealDamageToEnemy(enemy, damage, "holy-wave");
-      }
+      });
       continue;
     }
 
@@ -7816,6 +8130,67 @@ function render() {
   drawScreenVignette();
 }
 
+function ensureTerrainRenderCache(zoom, startWorldX, startWorldY, endWorldX, endWorldY) {
+  if (
+    terrainRenderCache.zoom === zoom &&
+    terrainRenderCache.startWorldX === startWorldX &&
+    terrainRenderCache.startWorldY === startWorldY &&
+    terrainRenderCache.endWorldX === endWorldX &&
+    terrainRenderCache.endWorldY === endWorldY
+  ) {
+    return;
+  }
+
+  const tileSize = TERRAIN_TILE_SIZE;
+  const drawSize = Math.ceil(tileSize / zoom) + 1;
+  const tilesWide = Math.floor((endWorldX - startWorldX) / tileSize) + 1;
+  const tilesHigh = Math.floor((endWorldY - startWorldY) / tileSize) + 1;
+  const tilePositionsX = Array.from({ length: tilesWide }, (_, index) =>
+    Math.round((index * tileSize) / zoom)
+  );
+  const tilePositionsY = Array.from({ length: tilesHigh }, (_, index) =>
+    Math.round((index * tileSize) / zoom)
+  );
+  const lastTileX = tilePositionsX[tilePositionsX.length - 1] ?? 0;
+  const lastTileY = tilePositionsY[tilePositionsY.length - 1] ?? 0;
+  TERRAIN_CACHE_CANVAS.width = Math.max(1, lastTileX + drawSize + 2);
+  TERRAIN_CACHE_CANVAS.height = Math.max(1, lastTileY + drawSize + 2);
+
+  TERRAIN_CACHE_CTX.clearRect(0, 0, TERRAIN_CACHE_CANVAS.width, TERRAIN_CACHE_CANVAS.height);
+  TERRAIN_CACHE_CTX.fillStyle = "#0f1a15";
+  TERRAIN_CACHE_CTX.fillRect(0, 0, TERRAIN_CACHE_CANVAS.width, TERRAIN_CACHE_CANVAS.height);
+  terrainRenderCache.waterTiles = [];
+
+  for (let tileYIndex = 0, worldY = startWorldY; worldY <= endWorldY; worldY += tileSize, tileYIndex += 1) {
+    const screenY = tilePositionsY[tileYIndex];
+    for (let tileXIndex = 0, worldX = startWorldX; worldX <= endWorldX; worldX += tileSize, tileXIndex += 1) {
+      const screenX = tilePositionsX[tileXIndex];
+      const terrain = getTerrainTileBase(worldX + tileSize * 0.5, worldY + tileSize * 0.5);
+      TERRAIN_CACHE_CTX.fillStyle = terrain.baseFill;
+      TERRAIN_CACHE_CTX.fillRect(screenX, screenY, drawSize, drawSize);
+
+      if (terrain.speckAlpha > 0.03) {
+        TERRAIN_CACHE_CTX.fillStyle = tintAlpha(terrain.speckColor, terrain.speckAlpha);
+        TERRAIN_CACHE_CTX.fillRect(
+          Math.floor(screenX + terrain.speckX / zoom),
+          Math.floor(screenY + terrain.speckY / zoom),
+          Math.max(1, Math.ceil(terrain.speckSize / zoom)),
+          Math.max(1, Math.ceil(terrain.speckSize / zoom))
+        );
+      }
+      if (terrain.type === "water") {
+        terrainRenderCache.waterTiles.push({ worldX, worldY, screenX, screenY, drawSize });
+      }
+    }
+  }
+
+  terrainRenderCache.zoom = zoom;
+  terrainRenderCache.startWorldX = startWorldX;
+  terrainRenderCache.startWorldY = startWorldY;
+  terrainRenderCache.endWorldX = endWorldX;
+  terrainRenderCache.endWorldY = endWorldY;
+}
+
 function drawBackground() {
   ctx.clearRect(0, 0, viewWidth, viewHeight);
   ctx.fillStyle = "#000000";
@@ -7843,24 +8218,23 @@ function drawBackground() {
   const startWorldY = Math.floor((state.player.y - halfWorldViewHeight) / tileSize) * tileSize - renderPadding;
   const endWorldX = Math.ceil((state.player.x + halfWorldViewWidth) / tileSize) * tileSize + renderPadding;
   const endWorldY = Math.ceil((state.player.y + halfWorldViewHeight) / tileSize) * tileSize + renderPadding;
-
-  for (let worldY = startWorldY; worldY <= endWorldY; worldY += tileSize) {
-    for (let worldX = startWorldX; worldX <= endWorldX; worldX += tileSize) {
-      const screen = worldToScreen(worldX, worldY);
-      const terrain = sampleTerrainTile(worldX + tileSize * 0.5, worldY + tileSize * 0.5);
-      ctx.fillStyle = terrain.fill;
-      const drawSize = Math.ceil(tileSize / zoom) + 1;
-      ctx.fillRect(Math.floor(screen.x), Math.floor(screen.y), drawSize, drawSize);
-
-      if (terrain.speckAlpha > 0.03) {
-        ctx.fillStyle = tintAlpha(terrain.speckColor, terrain.speckAlpha);
-        ctx.fillRect(
-          Math.floor(screen.x + terrain.speckX / zoom),
-          Math.floor(screen.y + terrain.speckY / zoom),
-          Math.max(1, Math.ceil(terrain.speckSize / zoom)),
-          Math.max(1, Math.ceil(terrain.speckSize / zoom))
-        );
-      }
+  ensureTerrainRenderCache(zoom, startWorldX, startWorldY, endWorldX, endWorldY);
+  const terrainOrigin = worldToScreen(startWorldX, startWorldY);
+  const terrainOriginX = Math.floor(terrainOrigin.x);
+  const terrainOriginY = Math.floor(terrainOrigin.y);
+  ctx.drawImage(TERRAIN_CACHE_CANVAS, terrainOriginX, terrainOriginY);
+  for (const tile of terrainRenderCache.waterTiles) {
+    const terrain = sampleTerrainTile(tile.worldX + tileSize * 0.5, tile.worldY + tileSize * 0.5);
+    ctx.fillStyle = terrain.fill;
+    ctx.fillRect(terrainOriginX + tile.screenX, terrainOriginY + tile.screenY, tile.drawSize, tile.drawSize);
+    if (terrain.speckAlpha > 0.03) {
+      ctx.fillStyle = tintAlpha(terrain.speckColor, terrain.speckAlpha);
+      ctx.fillRect(
+        Math.floor(terrainOriginX + tile.screenX + terrain.speckX / zoom),
+        Math.floor(terrainOriginY + tile.screenY + terrain.speckY / zoom),
+        Math.max(1, Math.ceil(terrain.speckSize / zoom)),
+        Math.max(1, Math.ceil(terrain.speckSize / zoom))
+      );
     }
   }
 
@@ -7916,6 +8290,7 @@ function drawRockFeature(feature) {
 }
 
 function drawProjectiles() {
+  const perfTier = getPerformanceTier();
   const fxTier = getFxTier();
   for (const projectile of state.projectiles) {
     const pos = worldToScreen(projectile.x, projectile.y);
@@ -7933,6 +8308,14 @@ function drawProjectiles() {
     const renderRadius = projectile.renderRadius ?? projectile.radius;
 
     ctx.save();
+    if (perfTier >= 2) {
+      ctx.fillStyle = projectileColor;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, Math.max(2, renderRadius * 0.9), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      continue;
+    }
     if (projectile.skillType === "crystal-spear") {
       drawGradientTrail(pos.x, pos.y, tailX * 2.8, tailY * 2.8, renderRadius * 0.64, accentRgb, 0.92);
       const angle = Math.atan2(projectile.vy, projectile.vx);
@@ -7999,6 +8382,7 @@ function drawGradientTrail(headX, headY, tailX, tailY, width, rgb, headAlpha = 0
 }
 
 function drawEnemyAttacks() {
+  const perfTier = getPerformanceTier();
   ctx.save();
 
   for (const attack of state.enemyAttacks) {
@@ -8016,10 +8400,15 @@ function drawEnemyAttacks() {
       const tailX = (attack.vx / speed) * 18;
       const tailY = (attack.vy / speed) * 18;
       ctx.save();
-      const color = parseColorComponents(attack.color.startsWith("rgba") ? attack.color.replace("{a}", "1") : attack.color);
-      drawGradientTrail(pos.x, pos.y, tailX, tailY, attack.radius * 1.25, `${color.r}, ${color.g}, ${color.b}`, 0.88);
-      ctx.shadowBlur = 18;
-      ctx.shadowColor = tintAlpha(attack.color, 0.42);
+      attack.rgb ??= (() => {
+        const parsed = parseColorComponents(attack.color.startsWith("rgba") ? attack.color.replace("{a}", "1") : attack.color);
+        return `${parsed.r}, ${parsed.g}, ${parsed.b}`;
+      })();
+      if (perfTier === 0) {
+        drawGradientTrail(pos.x, pos.y, tailX, tailY, attack.radius * 1.25, attack.rgb, 0.88);
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = tintAlpha(attack.color, 0.42);
+      }
       ctx.fillStyle = tintAlpha(attack.color, 0.9);
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, attack.radius, 0, Math.PI * 2);
@@ -8047,8 +8436,10 @@ function drawEnemyAttacks() {
       ctx.save();
       ctx.strokeStyle = tintAlpha(attack.color, 0.88);
       ctx.lineWidth = attack.width;
-      ctx.shadowBlur = 18;
-      ctx.shadowColor = tintAlpha(attack.color, 0.35);
+      if (perfTier < 2) {
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = tintAlpha(attack.color, 0.35);
+      }
       ctx.beginPath();
       ctx.moveTo(pos.x, pos.y);
       ctx.lineTo(end.x, end.y);
@@ -8074,8 +8465,10 @@ function drawEnemyAttacks() {
       ctx.save();
       ctx.strokeStyle = tintAlpha(attack.color, 0.58);
       ctx.lineWidth = attack.thickness;
-      ctx.shadowBlur = 16;
-      ctx.shadowColor = tintAlpha(attack.color, 0.3);
+      if (perfTier < 2) {
+        ctx.shadowBlur = 16;
+        ctx.shadowColor = tintAlpha(attack.color, 0.3);
+      }
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, attack.currentRadius, 0, Math.PI * 2);
       ctx.stroke();
@@ -8085,8 +8478,10 @@ function drawEnemyAttacks() {
 
     ctx.save();
     ctx.fillStyle = tintAlpha(attack.color, 0.24);
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = tintAlpha(attack.color, 0.3);
+    if (perfTier < 2) {
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = tintAlpha(attack.color, 0.3);
+    }
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, attack.radius, 0, Math.PI * 2);
     ctx.fill();
@@ -8316,18 +8711,84 @@ function fillGradientRing(x, y, innerRadius, outerRadius, stops, composite = "so
 
 function drawSoftBurstParticle(x, y, radius, innerColor, outerColor, composite = "screen") {
   withComposite(composite, () => {
-    ctx.filter = `blur(${Math.max(1.8, radius * 0.34).toFixed(2)}px)`;
-    const mote = ctx.createRadialGradient(x, y, 0, x, y, radius);
-    mote.addColorStop(0, innerColor);
-    mote.addColorStop(0.42, innerColor);
-    mote.addColorStop(1, outerColor);
-    ctx.fillStyle = mote;
-    ctx.shadowBlur = Math.max(8, radius * 1.4);
-    ctx.shadowColor = innerColor;
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fill();
+    const sprite = getSoftBurstSprite(innerColor, outerColor, radius);
+    ctx.drawImage(sprite, x - sprite.width * 0.5, y - sprite.height * 0.5);
   });
+}
+
+function getParticleSprite(color, radius) {
+  const roundedRadius = Math.max(1, Math.round(radius * 2) / 2);
+  const resolved = color.includes("{a}") ? color.replace("{a}", "1") : color;
+  const rgb = parseColorComponents(resolved);
+  const cacheKey = `${rgb.r},${rgb.g},${rgb.b}:${roundedRadius}`;
+  const cached = PARTICLE_SPRITE_CACHE.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const spriteRadius = roundedRadius;
+  const padding = Math.ceil(spriteRadius * 2.6);
+  const size = Math.max(8, Math.ceil(spriteRadius * 2 + padding * 2));
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const spriteCtx = canvas.getContext("2d");
+  const center = size / 2;
+  const gradient = spriteCtx.createRadialGradient(center, center, 0, center, center, spriteRadius);
+  gradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1)`);
+  gradient.addColorStop(0.42, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1)`);
+  gradient.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0)`);
+  spriteCtx.fillStyle = gradient;
+  spriteCtx.shadowBlur = Math.max(8, spriteRadius * 1.4);
+  spriteCtx.shadowColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1)`;
+  spriteCtx.beginPath();
+  spriteCtx.arc(center, center, spriteRadius, 0, Math.PI * 2);
+  spriteCtx.fill();
+  PARTICLE_SPRITE_CACHE.set(cacheKey, canvas);
+  return canvas;
+}
+
+function normalizeColorCacheKey(color) {
+  const match = color.match(/rgba?\(([^)]+)\)/i);
+  if (!match) {
+    return color;
+  }
+  const parts = match[1].split(",").map((part) => part.trim());
+  const r = Number.parseFloat(parts[0] ?? "255");
+  const g = Number.parseFloat(parts[1] ?? "255");
+  const b = Number.parseFloat(parts[2] ?? "255");
+  const a = parts.length > 3 ? Math.round(Number.parseFloat(parts[3] ?? "1") * 20) / 20 : 1;
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+function getSoftBurstSprite(innerColor, outerColor, radius) {
+  const roundedRadius = Math.max(1, Math.round(radius * 2) / 2);
+  const cacheKey = `${normalizeColorCacheKey(innerColor)}|${normalizeColorCacheKey(outerColor)}|${roundedRadius}`;
+  const cached = SOFT_BURST_SPRITE_CACHE.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const padding = Math.ceil(roundedRadius * 2.8);
+  const size = Math.max(8, Math.ceil(roundedRadius * 2 + padding * 2));
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const spriteCtx = canvas.getContext("2d");
+  const center = size / 2;
+  spriteCtx.filter = `blur(${Math.max(1.8, roundedRadius * 0.34).toFixed(2)}px)`;
+  const mote = spriteCtx.createRadialGradient(center, center, 0, center, center, roundedRadius);
+  mote.addColorStop(0, innerColor);
+  mote.addColorStop(0.42, innerColor);
+  mote.addColorStop(1, outerColor);
+  spriteCtx.fillStyle = mote;
+  spriteCtx.shadowBlur = Math.max(8, roundedRadius * 1.4);
+  spriteCtx.shadowColor = innerColor;
+  spriteCtx.beginPath();
+  spriteCtx.arc(center, center, roundedRadius, 0, Math.PI * 2);
+  spriteCtx.fill();
+  SOFT_BURST_SPRITE_CACHE.set(cacheKey, canvas);
+  return canvas;
 }
 
 function drawGradientStroke(x1, y1, x2, y2, width, stops, composite = "source-over") {
@@ -8361,11 +8822,102 @@ function drawEffects(layer = "base") {
 
     const lifeRatio = clamp(effect.life / effect.maxLife, 0, 1);
 
+    if (effect.kind === "skill-accent") {
+      const progress = 1 - lifeRatio;
+      const alpha = easeOutQuad(lifeRatio);
+      const radius = effect.size + progress * effect.growth;
+      const palette = getEffectPalette(effect);
+
+      withComposite("screen", () => {
+        ctx.strokeStyle = palette.primary(0.12 + alpha * 0.36);
+        ctx.lineWidth = Math.max(1.2, effect.lineWidth * lifeRatio);
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+
+      for (const spark of effect.sparks ?? []) {
+        const sparkRadius = radius * (spark.reach / Math.max(1, effect.growth + effect.size));
+        const sparkX = pos.x + Math.cos(spark.angle) * sparkRadius;
+        const sparkY = pos.y + Math.sin(spark.angle) * sparkRadius;
+        drawSoftBurstParticle(
+          sparkX,
+          sparkY,
+          spark.size,
+          palette.secondary(0.12 + alpha * 0.26),
+          palette.secondary(0),
+          "screen"
+        );
+      }
+
+      for (const ray of effect.rays ?? []) {
+        const x2 = pos.x + Math.cos(ray.angle) * ray.reach;
+        const y2 = pos.y + Math.sin(ray.angle) * ray.reach;
+        drawGradientStroke(
+          pos.x,
+          pos.y,
+          x2,
+          y2,
+          ray.lineWidth,
+          [
+            [0, palette.tertiary(0.04 + alpha * 0.12)],
+            [0.58, palette.tertiary(0.08 + alpha * 0.18)],
+            [1, palette.tertiary(0)],
+          ],
+          "screen"
+        );
+      }
+
+      for (const ember of effect.embers ?? []) {
+        const emberX = pos.x + ember.offsetX + ember.driftX * progress * 0.18;
+        const emberY = pos.y + ember.offsetY - ember.rise * progress * 0.18;
+        drawSoftBurstParticle(
+          emberX,
+          emberY,
+          ember.size,
+          palette.light(0.1 + alpha * 0.16),
+          palette.light(0),
+          "screen"
+        );
+      }
+      continue;
+    }
+
+    if (effect.kind === "particle-burst") {
+      ctx.save();
+      ctx.globalCompositeOperation = effect.composite ?? "screen";
+      for (const particle of effect.particles) {
+        if (particle.life <= 0) {
+          continue;
+        }
+        const particlePos = worldToScreen(particle.x, particle.y);
+        if (!isVisible(particlePos.x, particlePos.y, particle.size + 20)) {
+          continue;
+        }
+        const particleLifeRatio = clamp(particle.life / particle.maxLife, 0, 1);
+        const radius = Math.max(0.8, particle.size * particleLifeRatio);
+        const sprite = getParticleSprite(effect.color, radius);
+        ctx.globalAlpha = 0.22 + particleLifeRatio * 0.52;
+        ctx.drawImage(sprite, particlePos.x - sprite.width * 0.5, particlePos.y - sprite.height * 0.5);
+      }
+      ctx.restore();
+      continue;
+    }
+
     if (effect.kind === "line") {
       if (fxTier >= 2) {
         continue;
       }
       const end = worldToScreen(effect.x2, effect.y2);
+      if (effect.hostile || fxTier >= 1) {
+        ctx.strokeStyle = tintAlpha(effect.color, 0.18 + lifeRatio * 0.26);
+        ctx.lineWidth = Math.max(1, effect.lineWidth * Math.max(0.45, lifeRatio));
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+        continue;
+      }
       withComposite("screen", () => {
         ctx.strokeStyle = tintAlpha(effect.color, 0.15 + lifeRatio * 0.3);
         ctx.lineWidth = effect.lineWidth * Math.max(0.4, lifeRatio);
@@ -8381,6 +8933,14 @@ function drawEffects(layer = "base") {
 
     if (effect.kind === "ring") {
       const radius = effect.size + (1 - lifeRatio) * effect.growth;
+      if (effect.hostile || fxTier >= 1) {
+        ctx.strokeStyle = tintAlpha(effect.color, 0.22 + lifeRatio * 0.28);
+        ctx.lineWidth = Math.max(1, effect.lineWidth * Math.max(0.5, lifeRatio));
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        continue;
+      }
       withComposite("screen", () => {
         ctx.strokeStyle = tintAlpha(effect.color, 0.24 + lifeRatio * 0.46);
         ctx.lineWidth = Math.max(1.2, effect.lineWidth * lifeRatio);
@@ -8399,7 +8959,7 @@ function drawEffects(layer = "base") {
       effect.lastEnvelopeScale = envelope.scale;
       effect.lastEnvelopeProgress = envelope.progress;
       const radius = (effect.radius ?? effect.size) * envelope.scale;
-      const palette = resolveEffectPalette(effect);
+      const palette = getEffectPalette(effect);
       const primary = effect.color;
       const secondary = effect.secondaryColor ?? effect.color;
       const profile = getSoftEffectProfile(effect.kind);
@@ -8959,7 +9519,7 @@ function drawEffects(layer = "base") {
       effect.lastEnvelopeProgress = envelope.progress;
       envelope.alpha = Math.min(2.36, envelope.alpha * 2.08);
       const centerPos = worldToScreen(centerX, centerY);
-      const palette = resolveEffectPalette(effect);
+      const palette = getEffectPalette(effect);
       ctx.save();
       ctx.translate(centerPos.x, centerPos.y);
       ctx.rotate(effect.angle);
@@ -9025,7 +9585,7 @@ function drawEffects(layer = "base") {
       effect.lastEnvelopeProgress = envelope.progress;
       envelope.alpha = Math.min(2.34, envelope.alpha * 2.02);
       const progress = effect.inFadeTail ? 1 : 1 - lifeRatio;
-      const palette = resolveEffectPalette(effect);
+      const palette = getEffectPalette(effect);
       ctx.save();
       fillGradientRing(
         pos.x,
@@ -9123,16 +9683,17 @@ function drawEffects(layer = "base") {
     const radius = Math.max(0.8, effect.size * lifeRatio);
     withComposite(effect.kind === "spark" || effect.kind === "ember" ? "screen" : "source-over", () => {
       if (effect.kind === "spark" || effect.kind === "ember") {
-        ctx.filter = `blur(${Math.max(1.8, radius * 0.42).toFixed(2)}px)`;
+        const sprite = getParticleSprite(effect.color, radius);
+        ctx.globalAlpha = 0.28 + lifeRatio * 0.82;
+        ctx.drawImage(sprite, pos.x - sprite.width * 0.5, pos.y - sprite.height * 0.5);
+      } else {
+        ctx.fillStyle = tintAlpha(effect.color, 0.28 + lifeRatio * 0.82);
+        ctx.shadowBlur = fxTier >= 1 ? 6 : 12;
+        ctx.shadowColor = tintAlpha(effect.color, 0.45);
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+        ctx.fill();
       }
-      ctx.fillStyle = tintAlpha(effect.color, 0.28 + lifeRatio * 0.82);
-      ctx.shadowBlur = effect.kind === "spark" || effect.kind === "ember"
-        ? (fxTier >= 1 ? 12 : 20)
-        : (fxTier >= 1 ? 6 : 12);
-      ctx.shadowColor = tintAlpha(effect.color, effect.kind === "spark" || effect.kind === "ember" ? 0.62 : 0.45);
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-      ctx.fill();
     });
   }
 
@@ -9155,27 +9716,39 @@ function drawPickups() {
       ? clamp(1 - pickup.spawnTimer / pickup.spawnDuration, 0, 1)
       : 1;
     const introScale = 0.42 + easeOutBack(introRatio) * 0.58;
+    const isXpOrb = pickup.type === "xp-orb";
+    const isXpCache = pickup.type === "xp-cache";
+    const isXp = isXpOrb || isXpCache;
     const warningWindow = pickup.despawnWarning ?? 4;
-    const fadeProgress = pickup.life < warningWindow
+    const fadeProgress = !pickup.expiring && pickup.life < warningWindow
       ? clamp(1 - pickup.life / warningWindow, 0, 1)
       : 0;
     const blinkSpeed = 1.8 + fadeProgress * 5.2;
     const blinkWave = 0.5 + 0.5 * Math.sin(pickup.floatTime * blinkSpeed);
-    const despawnAlpha = fadeProgress > 0
-      ? clamp(1 - fadeProgress * 0.42 - blinkWave * fadeProgress * 0.22, 0.24, 1)
-      : 1;
-    const isXpOrb = pickup.type === "xp-orb";
-    const isXpCache = pickup.type === "xp-cache";
-    const isXp = isXpOrb || isXpCache;
+    const expireProgress = pickup.expiring && pickup.expireDuration > 0
+      ? clamp(1 - pickup.expireTimer / pickup.expireDuration, 0, 1)
+      : 0;
+    const expireEase = easeInOut(expireProgress);
+    const despawnAlpha = pickup.expiring
+      ? 1 - easeOutQuad(expireProgress)
+      : fadeProgress > 0
+        ? isXp
+          ? clamp(1 - fadeProgress * 0.3, 0.3, 1)
+          : clamp(1 - fadeProgress * 0.42 - blinkWave * fadeProgress * 0.22, 0.24, 1)
+        : 1;
     const absorbProgress = pickup.absorbing ? clamp(1 - pickup.absorbTimer / pickup.absorbDuration, 0, 1) : 0;
-    const absorbScale = pickup.absorbing ? 1 - absorbProgress * 0.78 : 1;
+    const absorbScale = pickup.absorbing ? 1 - absorbProgress * 0.78 : pickup.expiring ? 1 - expireEase * 0.76 : 1;
     const absorbAlpha = pickup.absorbing ? 1 - absorbProgress * 0.85 : 1;
     const introAlpha = (0.32 + introRatio * 0.68) * despawnAlpha * absorbAlpha;
     const auraColor = isXp ? "rgba(255, 214, 92, 0.18)" : "rgba(107, 255, 178, 0.16)";
     const coreColor = isXpCache ? "rgba(255, 190, 70, 0.96)" : isXpOrb ? "rgba(255, 214, 92, 0.96)" : "rgba(87, 244, 167, 0.94)";
     const glowColor = isXp ? "rgba(255, 225, 128, 0.4)" : "rgba(126, 255, 183, 0.32)";
     const crossColor = isXp ? "rgba(255, 246, 214, 0.94)" : "rgba(231, 255, 241, 0.92)";
-    const auraScale = 1 + fadeProgress * 0.1 + blinkWave * fadeProgress * 0.08;
+    const auraScale = pickup.expiring
+      ? 1 + expireEase * 0.24
+      : isXp
+        ? 1 + fadeProgress * 0.06
+        : 1 + fadeProgress * 0.1 + blinkWave * fadeProgress * 0.08;
     ctx.save();
     ctx.globalAlpha = 0.45 * despawnAlpha;
     ctx.fillStyle = "rgba(6, 12, 10, 0.32)";
@@ -9189,11 +9762,12 @@ function drawPickups() {
     ctx.fill();
 
     ctx.translate(pos.x, pos.y + bobOffset);
-    ctx.scale(introScale * (1 + fadeProgress * 0.03) * absorbScale, introScale * (1 + fadeProgress * 0.03) * absorbScale);
+    const bodyScale = introScale * (1 + fadeProgress * 0.03) * absorbScale;
+    ctx.scale(bodyScale, bodyScale);
     ctx.rotate(isXpOrb ? 0 : Math.PI * 0.25);
     ctx.globalAlpha = introAlpha;
     ctx.fillStyle = coreColor;
-    ctx.shadowBlur = 18 + fadeProgress * 6;
+    ctx.shadowBlur = 18 + fadeProgress * 6 + expireEase * 4;
     ctx.shadowColor = glowColor;
     if (isXpOrb) {
       ctx.beginPath();
@@ -9300,6 +9874,7 @@ function updateHudBarAnimations(dt) {
 }
 
 function drawEnemies() {
+  const perfTier = getPerformanceTier();
   let activeFont = "";
 
   ctx.textAlign = "center";
@@ -9319,7 +9894,7 @@ function drawEnemies() {
       activeFont = font;
     }
 
-    if (enemy.isBoss && enemy.phase >= 2) {
+    if (perfTier === 0 && enemy.isBoss && enemy.phase >= 2) {
       const rageColor = BOSS_THEME_COLORS[enemy.type] ?? "rgba(255, 160, 120, {a})";
       const ragePulse = 0.62 + Math.sin(state.elapsed * 5.6 + enemy.id) * 0.14;
       ctx.save();
@@ -9339,23 +9914,7 @@ function drawEnemies() {
       ctx.restore();
     }
 
-    const statusVisuals = [
-      { key: "freeze", value: Math.max(enemy.freezeTimer, enemy.statusFlash.freeze), hue: 190, aura: "rgba(122, 212, 255, {a})" },
-      { key: "burn", value: Math.max(enemy.burnTimer * 0.25, enemy.statusFlash.burn), hue: 18, aura: "rgba(255, 154, 68, {a})" },
-      { key: "chill", value: Math.max(enemy.slowTimer * 0.3, enemy.statusFlash.chill), hue: 180, aura: "rgba(102, 196, 255, {a})" },
-      { key: "necro", value: Math.max(enemy.necroMarkTimer, enemy.statusFlash.necro), hue: 255, aura: "rgba(196, 142, 255, {a})" },
-      { key: "blood", value: Math.max(enemy.bloodMarkTimer, enemy.statusFlash.blood), hue: 334, aura: "rgba(255, 96, 138, {a})" },
-      { key: "wind", value: enemy.statusFlash.wind, hue: 0, aura: "rgba(255, 255, 255, {a})" },
-    ];
-    const status = statusVisuals.reduce((best, item) => {
-      if (item.value <= 0) {
-        return best;
-      }
-      if (!best) {
-        return item;
-      }
-      return (STATUS_PRIORITY[item.key] ?? 0) >= (STATUS_PRIORITY[best.key] ?? 0) ? item : best;
-    }, null);
+    const status = perfTier >= 2 ? null : getEnemyPrimaryStatus(enemy);
 
     if (status) {
       const auraStrength = clamp(status.value, 0.18, 0.95);
@@ -9374,7 +9933,7 @@ function drawEnemies() {
       ctx.fillText(enemy.emoji, pos.x, pos.y + 1);
       ctx.restore();
     } else {
-      if (enemy.isBoss && enemy.phase >= 2) {
+      if (enemy.isBoss && enemy.phase >= 2 && perfTier < 2) {
         ctx.save();
         ctx.filter = "saturate(1.18) brightness(1.1)";
         ctx.shadowBlur = 20;
@@ -9386,7 +9945,7 @@ function drawEnemies() {
       }
     }
 
-    if (enemy.hasteTimer > 0) {
+    if (perfTier === 0 && enemy.hasteTimer > 0) {
       const hasteStrength = clamp(enemy.hasteTimer / 3.6, 0.2, 0.9);
       ctx.save();
       ctx.strokeStyle = tintAlpha("rgba(168, 116, 255, {a})", 0.18 + hasteStrength * 0.28);
@@ -9397,7 +9956,7 @@ function drawEnemies() {
       ctx.restore();
     }
 
-    if (enemy.isBoss || enemy.hp >= enemy.maxHp - 0.01) {
+    if (perfTier >= 1 || enemy.isBoss || enemy.hp >= enemy.maxHp - 0.01) {
       continue;
     }
 
@@ -9440,6 +9999,7 @@ function drawAllies() {
 }
 
 function drawPlayer() {
+  const perfTier = getPerformanceTier();
   const center = worldToScreen(state.player.x, state.player.y);
   const classDef = getClassDef();
   const pulse = 0.58 + Math.sin(state.elapsed * 5.8) * 0.16;
@@ -9450,16 +10010,18 @@ function drawPlayer() {
   const deathProgress = runEnd.active ? clamp(runEnd.timer / runEnd.duration, 0, 1) : 0;
   const deathTilt = deathProgress * 1.56;
 
-  ctx.save();
-  const aura = ctx.createRadialGradient(center.x + jitterX, center.y + jitterY, 1, center.x + jitterX, center.y + jitterY, 28);
-  aura.addColorStop(0, tintAlpha(classDef.color, 0.08 + pulse * 0.04));
-  aura.addColorStop(0.38, tintAlpha(classDef.color, 0.06));
-  aura.addColorStop(1, "rgba(19, 40, 33, 0)");
-  ctx.fillStyle = aura;
-  ctx.beginPath();
-  ctx.arc(center.x + jitterX, center.y + jitterY, 28, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+  if (perfTier === 0) {
+    ctx.save();
+    const aura = ctx.createRadialGradient(center.x + jitterX, center.y + jitterY, 1, center.x + jitterX, center.y + jitterY, 28);
+    aura.addColorStop(0, tintAlpha(classDef.color, 0.08 + pulse * 0.04));
+    aura.addColorStop(0.38, tintAlpha(classDef.color, 0.06));
+    aura.addColorStop(1, "rgba(19, 40, 33, 0)");
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(center.x + jitterX, center.y + jitterY, 28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 
   ctx.globalAlpha = 1;
   ctx.textAlign = "center";
@@ -9472,8 +10034,10 @@ function drawPlayer() {
     ctx.translate(deathProgress * 10, deathProgress * 8);
     ctx.globalAlpha = 1 - deathProgress * 0.16;
   }
-  ctx.shadowBlur = 18;
-  ctx.shadowColor = "rgba(255, 223, 138, 0.35)";
+  if (perfTier < 2) {
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = "rgba(255, 223, 138, 0.35)";
+  }
   ctx.fillText(state.player.emoji, 0, 0);
   ctx.restore();
   ctx.shadowBlur = 0;
@@ -9520,6 +10084,10 @@ function drawDamageNumbers() {
   if (state.damageNumbers.length === 0) {
     return;
   }
+  const perfTier = getPerformanceTier();
+  if (perfTier >= 3) {
+    return;
+  }
 
   ctx.save();
   ctx.textAlign = "center";
@@ -9536,12 +10104,14 @@ function drawDamageNumbers() {
     ctx.save();
     ctx.translate(pos.x, pos.y);
     ctx.scale(scale, scale);
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = tintAlpha("rgba(255, 248, 235, {a})", alpha * 0.28);
-    ctx.strokeStyle = `rgba(22, 28, 25, ${(alpha * 0.88).toFixed(3)})`;
-    ctx.lineWidth = 4;
+    if (perfTier === 0) {
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = tintAlpha("rgba(255, 248, 235, {a})", alpha * 0.28);
+      ctx.strokeStyle = `rgba(22, 28, 25, ${(alpha * 0.88).toFixed(3)})`;
+      ctx.lineWidth = 4;
+      ctx.strokeText(String(number.amount), 0, 0);
+    }
     ctx.fillStyle = hexToRgba(number.color, alpha);
-    ctx.strokeText(String(number.amount), 0, 0);
     ctx.fillText(String(number.amount), 0, 0);
     ctx.restore();
   }
@@ -9549,18 +10119,12 @@ function drawDamageNumbers() {
 }
 
 function drawScreenVignette() {
-  const vignette = ctx.createRadialGradient(
-    viewWidth * 0.5,
-    viewHeight * 0.5,
-    Math.min(viewWidth, viewHeight) * 0.12,
-    viewWidth * 0.5,
-    viewHeight * 0.5,
-    Math.max(viewWidth, viewHeight) * 0.78
-  );
-  vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
-  vignette.addColorStop(1, "rgba(2, 8, 7, 0.22)");
-  ctx.fillStyle = vignette;
+  const perfTier = getPerformanceTier();
+  ctx.save();
+  ctx.globalAlpha = perfTier >= 2 ? 0.16 : 0.22;
+  ctx.fillStyle = screenVignetteGradient;
   ctx.fillRect(0, 0, viewWidth, viewHeight);
+  ctx.restore();
 
   const hpRatio = clamp(state.player.hp / state.player.maxHp, 0, 1);
   const danger = Math.max(0, 1 - hpRatio * 1.35);
@@ -9571,30 +10135,24 @@ function drawScreenVignette() {
     return;
   }
 
-  const hurt = ctx.createRadialGradient(
-    viewWidth * 0.5,
-    viewHeight * 0.5,
-    Math.min(viewWidth, viewHeight) * 0.18,
-    viewWidth * 0.5,
-    viewHeight * 0.5,
-    Math.max(viewWidth, viewHeight) * 0.72
-  );
-  hurt.addColorStop(0, "rgba(0, 0, 0, 0)");
-  hurt.addColorStop(0.72, `rgba(120, 20, 22, ${0.08 + totalGlow * 0.12})`);
-  hurt.addColorStop(1, `rgba(196, 22, 28, ${0.16 + totalGlow * 0.34})`);
-  ctx.fillStyle = hurt;
+  ctx.save();
+  ctx.globalAlpha = perfTier >= 2
+    ? 0.08 + totalGlow * 0.22
+    : 0.16 + totalGlow * 0.34;
+  ctx.fillStyle = hurtVignetteGradient;
   ctx.fillRect(0, 0, viewWidth, viewHeight);
+  ctx.restore();
 
   if (!state.runEnd.active) {
     return;
   }
 
   const deathProgress = clamp(state.runEnd.timer / state.runEnd.duration, 0, 1);
-  const redWash = ctx.createLinearGradient(0, 0, 0, viewHeight);
-  redWash.addColorStop(0, `rgba(255, 124, 124, ${0.06 + deathProgress * 0.12})`);
-  redWash.addColorStop(1, `rgba(118, 18, 24, ${0.12 + deathProgress * 0.26})`);
-  ctx.fillStyle = redWash;
+  ctx.save();
+  ctx.globalAlpha = 0.12 + deathProgress * 0.26;
+  ctx.fillStyle = deathWashGradient;
   ctx.fillRect(0, 0, viewWidth, viewHeight);
+  ctx.restore();
 
   ctx.save();
   ctx.textAlign = "center";
@@ -10950,15 +11508,94 @@ function resolveEffectPalette(effect) {
   };
 }
 
+function getEffectPalette(effect) {
+  if (!effect.paletteCache) {
+    effect.paletteCache = resolveEffectPalette(effect);
+  }
+  return effect.paletteCache;
+}
+
+function getEffectRetentionPriority(effect) {
+  if (effect.retentionPriority != null) {
+    return effect.retentionPriority;
+  }
+  if (effect.followPlayer || SOFT_SKILL_EFFECT_KINDS.has(effect.kind) || effect.kind === "holy-wave") {
+    return 3;
+  }
+  if (effect.kind === "skill-accent" || effect.kind === "holy-text") {
+    return 2;
+  }
+  if (
+    effect.kind === "particle-burst" ||
+    effect.kind === "spark" ||
+    effect.kind === "ember" ||
+    effect.kind === "ring"
+  ) {
+    return 0;
+  }
+  return 1;
+}
+
+function getEffectRemainingLife(effect) {
+  return Math.max(effect.life ?? 0, effect.armTime ?? 0, effect.absorbDuration ?? 0);
+}
+
+function findEffectTrimIndex(incomingPriority) {
+  let bestIndex = -1;
+  let bestPriority = Number.POSITIVE_INFINITY;
+  let bestLife = Number.POSITIVE_INFINITY;
+
+  for (let i = 0; i < state.effects.length; i += 1) {
+    const candidate = state.effects[i];
+    const priority = getEffectRetentionPriority(candidate);
+    const remainingLife = getEffectRemainingLife(candidate);
+    if (
+      priority < bestPriority ||
+      (priority === bestPriority && remainingLife < bestLife)
+    ) {
+      bestPriority = priority;
+      bestLife = remainingLife;
+      bestIndex = i;
+    }
+  }
+
+  if (bestIndex === -1 || bestPriority > incomingPriority) {
+    return -1;
+  }
+  return bestIndex;
+}
+
 function pushEffect(effect) {
   const tier = getFxTier();
   const cap = tier >= 2 ? 90 : tier >= 1 ? 140 : 220;
-  if (state.effects.length >= cap) {
-    state.effects.splice(0, state.effects.length - (cap - 1));
+  const incomingPriority = getEffectRetentionPriority(effect);
+  while (state.effects.length >= cap) {
+    const trimIndex = findEffectTrimIndex(incomingPriority);
+    if (trimIndex === -1) {
+      return;
+    }
+    state.effects.splice(trimIndex, 1);
   }
   effect.seed ??= Math.random() * Math.PI * 2;
   effect.seed2 ??= Math.random() * Math.PI * 2;
   state.effects.push(effect);
+}
+
+function pushParticleBurst(x, y, color, particles, options = {}) {
+  if (!particles || particles.length === 0) {
+    return;
+  }
+  pushEffect({
+    kind: "particle-burst",
+    x,
+    y,
+    life: Math.max(...particles.map((particle) => particle.life)),
+    maxLife: Math.max(...particles.map((particle) => particle.life)),
+    color,
+    renderLayer: options.renderLayer ?? "base",
+    composite: options.composite ?? "screen",
+    particles,
+  });
 }
 
 function spawnCastEffect(x, y, dirX, dirY) {
@@ -11036,35 +11673,35 @@ function spawnPickupCollectEffect(x, y, palette, scale = 1) {
     color: palette.ringColor,
   });
 
+  const particles = [];
   for (let i = 0; i < scaleFxCount(Math.round(6 * Math.max(1, scale))); i += 1) {
     const angle = (i / 6) * Math.PI * 2 + randRange(-0.16, 0.16);
     const speed = randRange(52, 120);
-    pushEffect({
-      kind: "spark",
+    const life = randRange(0.18, 0.32);
+    particles.push({
       x,
       y,
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed - 18,
-      life: randRange(0.18, 0.32),
-      maxLife: 0.32,
+      life,
+      maxLife: life,
       size: randRange(2.6, 4.2) * Math.min(1.35, Math.sqrt(scale)),
-      color: palette.sparkColor,
     });
   }
 
   for (let i = 0; i < scaleFxCount(Math.round(4 * Math.max(1, scale))); i += 1) {
-    pushEffect({
-      kind: "ember",
+    const life = randRange(0.28, 0.44);
+    particles.push({
       x: x + randRange(-5, 5),
       y: y - randRange(2, 10),
       vx: randRange(-20, 20),
       vy: -randRange(70, 125),
-      life: randRange(0.28, 0.44),
-      maxLife: 0.44,
+      life,
+      maxLife: life,
       size: randRange(3.4, 5.2) * Math.min(1.35, Math.sqrt(scale)),
-      color: palette.sparkColor,
     });
   }
+  pushParticleBurst(x, y, palette.sparkColor, particles);
 
   pushEffect({
     kind: "ring",
@@ -11096,20 +11733,21 @@ function spawnPickupSpawnEffect(x, y, type) {
     color: ringColor,
   });
 
+  const particles = [];
   for (let i = 0; i < scaleFxCount(5); i += 1) {
     const angle = (i / 5) * Math.PI * 2 + randRange(-0.22, 0.22);
-    pushEffect({
-      kind: "spark",
+    const life = randRange(0.16, 0.24);
+    particles.push({
       x,
       y,
       vx: Math.cos(angle) * randRange(18, 54),
       vy: Math.sin(angle) * randRange(18, 54) - 12,
-      life: randRange(0.16, 0.24),
-      maxLife: 0.24,
+      life,
+      maxLife: life,
       size: randRange(2, 3.2),
-      color: glowColor,
     });
   }
+  pushParticleBurst(x, y, glowColor, particles);
 }
 
 function getSkillCastPalette(skillId) {
@@ -11156,67 +11794,37 @@ function getSkillCastPalette(skillId) {
 function spawnSkillCastAccent(skillId, x, y) {
   const palette = getSkillCastPalette(skillId);
   pushEffect({
-    kind: "ring",
+    kind: "skill-accent",
     x,
     y,
-    life: 0.18,
-    maxLife: 0.18,
+    life: 0.22,
+    maxLife: 0.22,
     size: 6,
     growth: 28,
     lineWidth: 2.6,
     color: palette.ringColor,
+    secondaryColor: palette.sparkColor,
+    tertiaryColor: palette.lineColor,
+    lightColor: palette.emberColor,
     renderLayer: "top",
-  });
-
-  for (let i = 0; i < scaleFxCount(8); i += 1) {
-    const angle = (i / 8) * Math.PI * 2 + randRange(-0.16, 0.16);
-    const speed = randRange(44, 116);
-    pushEffect({
-      kind: "spark",
-      x,
-      y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      life: randRange(0.16, 0.28),
-      maxLife: 0.28,
+    sparks: Array.from({ length: 8 }, (_, i) => ({
+      angle: (i / 8) * Math.PI * 2 + randRange(-0.16, 0.16),
+      reach: randRange(16, 34),
       size: randRange(2.2, 4.2),
-      color: palette.sparkColor,
-      renderLayer: "top",
-    });
-  }
-
-  for (let i = 0; i < scaleFxCount(4); i += 1) {
-    const angle = (i / 4) * Math.PI * 2 + randRange(-0.2, 0.2);
-    const reach = randRange(18, 42);
-    pushEffect({
-      kind: "line",
-      x,
-      y,
-      x2: x + Math.cos(angle) * reach,
-      y2: y + Math.sin(angle) * reach,
-      life: 0.16,
-      maxLife: 0.16,
+    })),
+    rays: Array.from({ length: 4 }, (_, i) => ({
+      angle: (i / 4) * Math.PI * 2 + randRange(-0.2, 0.2),
+      reach: randRange(18, 42),
       lineWidth: randRange(2.6, 4.2),
-      size: reach,
-      color: palette.lineColor,
-      renderLayer: "top",
-    });
-  }
-
-  for (let i = 0; i < scaleFxCount(4); i += 1) {
-    pushEffect({
-      kind: "ember",
-      x: x + randRange(-6, 6),
-      y: y + randRange(-6, 6),
-      vx: randRange(-26, 26),
-      vy: -randRange(28, 82),
-      life: randRange(0.2, 0.34),
-      maxLife: 0.34,
+    })),
+    embers: Array.from({ length: 4 }, () => ({
+      offsetX: randRange(-6, 6),
+      offsetY: randRange(-6, 6),
+      driftX: randRange(-26, 26),
+      rise: randRange(28, 82),
       size: randRange(2.6, 4.4),
-      color: palette.emberColor,
-      renderLayer: "top",
-    });
-  }
+    })),
+  });
 }
 
 function spawnHolyLevelUpNova(x, y, level) {
@@ -11302,21 +11910,22 @@ function spawnSparkBurst(x, y, color, amount = 4) {
     color,
   });
 
+  const particles = [];
   for (let i = 0; i < scaleFxCount(amount); i += 1) {
     const angle = (i / Math.max(1, amount)) * Math.PI * 2 + randRange(-0.35, 0.35);
     const speed = randRange(40, 118);
-    pushEffect({
-      kind: "spark",
+    const life = randRange(0.1, 0.18);
+    particles.push({
       x,
       y,
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
-      life: randRange(0.1, 0.18),
-      maxLife: 0.18,
+      life,
+      maxLife: life,
       size: randRange(1.8, 3.2),
-      color,
     });
   }
+  pushParticleBurst(x, y, color, particles);
 }
 
 function spawnHitEffect(x, y, palette, dirX, dirY) {
@@ -11339,21 +11948,22 @@ function spawnHitEffect(x, y, palette, dirX, dirY) {
     color,
   });
 
+  const particles = [];
   for (let i = 0; i < scaleFxCount(4); i += 1) {
     const spreadX = dirX * randRange(40, 120) + randRange(-90, 90);
     const spreadY = dirY * randRange(40, 120) + randRange(-90, 90);
-    pushEffect({
-      kind: "spark",
+    const life = randRange(0.14, 0.26);
+    particles.push({
       x: x + randRange(-3, 3),
       y: y + randRange(-3, 3),
       vx: spreadX,
       vy: spreadY,
-      life: randRange(0.14, 0.26),
-      maxLife: 0.26,
+      life,
+      maxLife: life,
       size: randRange(2.4, 4.8),
-      color,
     });
   }
+  pushParticleBurst(x, y, color, particles);
 }
 
 function spawnDefeatEffect(enemy) {
@@ -11390,21 +12000,22 @@ function spawnDefeatEffect(enemy) {
     color,
   });
 
+  const particles = [];
   for (let i = 0; i < scaleFxCount(6); i += 1) {
     const angle = (i / 6) * Math.PI * 2 + randRange(-0.28, 0.28);
     const speed = randRange(70, 160);
-    pushEffect({
-      kind: "ember",
+    const life = randRange(0.26, 0.4);
+    particles.push({
       x: enemy.x,
       y: enemy.y,
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
-      life: randRange(0.26, 0.4),
-      maxLife: 0.4,
+      life,
+      maxLife: life,
       size: randRange(2.6, 5.8),
-      color,
     });
   }
+  pushParticleBurst(enemy.x, enemy.y, color, particles);
 }
 
 function spawnPlayerDamageEffect(x, y, intensity) {
@@ -11448,21 +12059,22 @@ function spawnMeteorImpactEffect(x, y, color) {
     lineWidth: 4,
     color,
   });
+  const particles = [];
   for (let i = 0; i < 8; i += 1) {
     const angle = (i / 8) * Math.PI * 2 + randRange(-0.25, 0.25);
     const speed = randRange(90, 180);
-    pushEffect({
-      kind: "ember",
+    const life = randRange(0.18, 0.34);
+    particles.push({
       x,
       y,
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
-      life: randRange(0.18, 0.34),
-      maxLife: 0.34,
+      life,
+      maxLife: life,
       size: randRange(3, 5.8),
-      color,
     });
   }
+  pushParticleBurst(x, y, color, particles);
 }
 
 function spawnChannelEffect(x, y, color, size, duration) {
@@ -11475,7 +12087,8 @@ function spawnChannelEffect(x, y, color, size, duration) {
     size,
     growth: 10,
     lineWidth: 2.4,
-    color: HOSTILE_ARCANE_COLOR,
+    color,
+    hostile: true,
   });
 }
 
@@ -11489,7 +12102,8 @@ function spawnBossPhaseEffect(x, y, color) {
     size: 38,
     growth: 54,
     lineWidth: 5,
-    color: HOSTILE_ARCANE_COLOR,
+    color,
+    hostile: true,
   });
 }
 
@@ -11503,7 +12117,8 @@ function spawnBossIntroEffect(enemy) {
     size: enemy.radius * 0.8,
     growth: enemy.radius + 44,
     lineWidth: 5,
-    color: HOSTILE_ARCANE_COLOR,
+    color: BOSS_THEME_COLORS[enemy.type] ?? HOSTILE_ARCANE_COLOR,
+    hostile: true,
   });
 }
 
@@ -11516,9 +12131,10 @@ function spawnLineEffect(x1, y1, x2, y2, duration, color, thickness) {
     y2,
     life: duration,
     maxLife: duration,
-    color: HOSTILE_ARCANE_COLOR,
+    color,
     lineWidth: thickness,
     size: 12,
+    hostile: true,
   });
 }
 
@@ -11526,6 +12142,7 @@ function spawnEnemyBolt(enemy, targetX, targetY, spec) {
   const dx = targetX - enemy.x;
   const dy = targetY - enemy.y;
   const distance = Math.hypot(dx, dy) || 1;
+  const color = spec.color ?? ENEMY_PROJECTILE_COLOR;
   state.enemyAttacks.push({
     kind: "projectile",
     x: enemy.x,
@@ -11534,7 +12151,11 @@ function spawnEnemyBolt(enemy, targetX, targetY, spec) {
     vy: (dy / distance) * spec.speed,
     radius: spec.radius,
     damage: spec.damage,
-    color: ENEMY_PROJECTILE_COLOR,
+    color,
+    rgb: (() => {
+      const parsed = parseColorComponents(color.includes("{a}") ? color.replace("{a}", "1") : color);
+      return `${parsed.r}, ${parsed.g}, ${parsed.b}`;
+    })(),
     life: spec.life,
     dead: false,
   });
@@ -11672,23 +12293,27 @@ function damagePlayer(rawDamage, source = null) {
   }
 
   const reducedDamage = rawDamage * (1 - player.damageReduction);
+  const perfTier = getPerformanceTier();
+  const shakeScale = perfTier >= 3 ? 0 : perfTier >= 2 ? 0.4 : perfTier >= 1 ? 0.68 : 1;
   recordTelemetryDamage(rawDamage, reducedDamage, source);
   player.hitFlash = clamp(player.hitFlash + reducedDamage / player.maxHp, 0, 1);
-  player.hitShakeTimer = 0.22;
-  player.hitShakePower = Math.max(player.hitShakePower, 3.6 + reducedDamage * 0.2);
+  player.hitShakeTimer = Math.max(player.hitShakeTimer, 0.22 * shakeScale);
+  player.hitShakePower = Math.max(player.hitShakePower, (3.6 + reducedDamage * 0.2) * shakeScale);
   state.hudMotion.playerBarShakeTimer = 0.24;
-  state.cameraShake.timer = 0.2;
-  state.cameraShake.power = Math.max(state.cameraShake.power, 5.4 + reducedDamage * 0.24);
-  spawnPlayerDamageEffect(player.x, player.y, reducedDamage / Math.max(8, player.maxHp));
+  state.cameraShake.timer = Math.max(state.cameraShake.timer, 0.2 * shakeScale);
+  state.cameraShake.power = Math.max(state.cameraShake.power, (5.4 + reducedDamage * 0.24) * shakeScale);
+  if (perfTier < 3) {
+    spawnPlayerDamageEffect(player.x, player.y, reducedDamage / Math.max(8, player.maxHp));
+  }
 
   if (state.dev.zenMode) {
     player.hp = player.maxHp;
-    updateHud(false);
+    requestHudRefresh(false);
     return;
   }
 
   player.hp = Math.max(0, player.hp - reducedDamage);
-  updateHud(false);
+  requestHudRefresh(false);
   if (player.hp <= 0) {
     endRun();
   }
@@ -11753,13 +12378,15 @@ function getPrimaryBoss() {
 }
 
 function collectNearestEnemies(limit) {
+  const cacheKey = buildQueryKey("nearest-list", state.player.x, state.player.y, limit, limit);
+  const queryCache = getFrameQueryCache();
+  if (queryCache.has(cacheKey)) {
+    return queryCache.get(cacheKey);
+  }
+
   const nearest = [];
-
-  for (const enemy of state.enemies) {
-    if (enemy.dead) {
-      continue;
-    }
-
+  const searchRadius = Math.max(viewWidth, viewHeight) * 1.6;
+  visitEnemiesInRange(state.player.x, state.player.y, searchRadius, (enemy) => {
     const dx = enemy.x - state.player.x;
     const dy = enemy.y - state.player.y;
     const distanceSq = dx * dx + dy * dy;
@@ -11767,18 +12394,20 @@ function collectNearestEnemies(limit) {
     if (nearest.length < limit) {
       nearest.push({ enemy, distanceSq });
       nearest.sort((a, b) => a.distanceSq - b.distanceSq);
-      continue;
+      return;
     }
 
     if (distanceSq >= nearest[nearest.length - 1].distanceSq) {
-      continue;
+      return;
     }
 
     nearest[nearest.length - 1] = { enemy, distanceSq };
     nearest.sort((a, b) => a.distanceSq - b.distanceSq);
-  }
+  });
 
-  return nearest.map((entry) => entry.enemy);
+  const result = nearest.map((entry) => entry.enemy);
+  queryCache.set(cacheKey, result);
+  return result;
 }
 
 window.render_game_to_text = function renderGameToText() {

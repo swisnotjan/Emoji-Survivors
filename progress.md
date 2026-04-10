@@ -218,6 +218,22 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
     - `hud-metrics.json`
     - `dash-fail.json`
     - `boss-hud.json`
+
+## Update: skill effect retention + XP pickup absorb/despawn polish (2026-04-10)
+- Fixed an intermittent skill bug where long-lived skill VFX could disappear early under load because `pushEffect()` trimmed the oldest effects indiscriminately once the effect cap was reached.
+- Added effect retention priorities so persistent skill effects and follow-player spell envelopes survive cap pressure, while low-value burst particles/rings are dropped first.
+- Reworked XP pickup magnet behavior:
+  - XP orbs/caches now commit to absorb earlier, before physical contact with the player.
+  - XP is granted on absorb commit, while the remaining travel is visual follow-through only.
+  - XP magnet pull now accelerates much more aggressively near the player and clamps to a higher close-range top speed.
+- Added lightweight pickup expiry animation on the pickup object itself (no extra VFX entities):
+  - XP orbs/caches now shrink/fade out when their lifetime ends.
+  - Removed the old blink-style alpha pulsing from XP despawn warning; only a clean disappearance remains.
+
+## Verification run (2026-04-10)
+- `npm run check` passes.
+- `npm run playtest:smoke` passes.
+- Smoke run produced no game errors; only the external Node warning from the skill-local Playwright client about missing `type: module` metadata remains.
 - Visual spot-checks completed on `codex-scroll.png`, `levelup-chips.png`, and `boss-hud.png`.
 ## Update: locked codex + dev-click upgrades + heal pickups + boss blessings
 - Restored future upgrades in the codex and marked them as locked with their unlock level.
@@ -1520,3 +1536,78 @@ ode verify-class-boss-focus.mjs passes and confirms locked class cards show enem
 - `npm run playtest:smoke` passes.
 - Targeted meta restore test confirms `Necro` auto-unlocks when stored progress already satisfies its requirement:
   - `output/web-game/verify-unlock-reconcile/checks.json`
+## Update: added project handoff document
+- Added `PROJECT_CONTEXT.md` with a full project overview: gameplay systems, architecture, config boundaries, balance decisions, deployment, testing, git quirks, and known risks.
+## Update: performance optimization pass
+- Reworked high-frequency enemy queries to use the existing spatial grid instead of repeated full-array scans:
+  - `findNearestEnemy()`
+  - `findDensestEnemyCluster()`
+  - nearby buff/burn propagation
+  - large parts of zone-effect hit detection in `updateEffects()`
+- Added per-frame query caching for repeated targeting lookups so auto-fire and auto-skills stop recomputing the same expensive searches multiple times in one tick.
+- Extended `buildEnemyGrid()` with boss/type metadata so boss-presence checks stop scanning the full enemy array every frame.
+- Added an offscreen terrain cache for the static arena background, which removes per-frame terrain tile recomposition from the hot render path.
+- Tightened adaptive degradation under load:
+  - stronger `getPerformanceTier()` thresholds
+  - simplified projectile and hostile-attack rendering on low tiers
+  - reduced enemy/player aura work on low tiers
+  - disabled or simplified damage numbers under heavy load
+  - capped damage-number count more aggressively
+
+## Latest verification
+- `npm run check` passes.
+- `npm run playtest:smoke` passes and produced:
+  - `output/web-game/playtest-smoke/shot-0.png`
+  - `output/web-game/playtest-smoke/state-0.json`
+- No `errors-*.json` files were produced in `output/web-game/playtest-smoke`.
+
+## Verification gap
+- A custom heavy-load Playwright stress script was attempted, but direct `playwright` import is unavailable in the local workspace (`ERR_MODULE_NOT_FOUND`), while the bundled skill client only supports action playback and not arbitrary `page.evaluate()` stress setup.
+## Update: hit-spike and hostile-cast performance follow-up
+- Replaced per-hit immediate `updateHud(false)` calls in `damagePlayer()` with deferred HUD refresh scheduling, so repeated damage events no longer force multiple mid-frame DOM updates.
+- Cached fullscreen vignette / hurt / death gradients on resize and reused them during render instead of recreating radial/linear gradients every frame.
+- Reduced hit feedback cost under load by scaling down camera shake / hit shake on higher perf tiers and skipping the hit ring VFX on the harshest tier.
+- Simplified hostile telegraph/effect rendering:
+  - hostile `ring` and `line` effects now render through a cheaper path;
+  - enemy projectile color parsing is cached at spawn time instead of in the hot draw loop;
+  - hostile projectile trails now only use the expensive gradient path on the best tier.
+
+## Latest verification
+- `npm run check` passes after the follow-up pass.
+- `npm run playtest:smoke` passes after the follow-up pass.
+## Update: skill-cast spike optimization
+- Replaced `spawnSkillCastAccent()` burst fan-out of separate `ring/spark/line/ember` objects with one composed `skill-accent` effect that preserves the same visual read while removing a large per-cast spike in `state.effects`.
+- Added palette caching on effect instances so large skill VFX no longer rebuild parsed color palettes and closures every frame during `drawEffects()`.
+
+## Latest verification
+- `npm run check` passes after the skill-cast optimization.
+- `npm run playtest:smoke` passes after the skill-cast optimization.
+## Update: hit and auto-attack micro-spike optimization
+- Added composed `particle-burst` effects so repeated hit/impact visuals no longer spawn large numbers of separate `spark/ember` effect objects.
+- Moved these hot paths onto the burst container:
+  - auto-attack `spawnHitEffect()`
+  - projectile wall impact `spawnSparkBurst()`
+  - enemy death `spawnDefeatEffect()`
+  - pickup collect/spawn bursts
+  - meteor impact burst particles
+- This keeps the same visual burst language but reduces per-frame effect iteration and object churn during dense auto-fire.
+
+## Latest verification
+- `npm run check` passes after the hit/auto-attack optimization.
+- `npm run playtest:smoke` passes after the hit/auto-attack optimization.
+## Update: particle sprite-cache follow-up
+- Added a cached offscreen particle-sprite path for tiny blurred particles.
+- `particle-burst` rendering and remaining standalone `spark/ember` draws now reuse pre-rendered sprites instead of rebuilding blur + radial-gradient state every frame per particle.
+- This specifically targets the unstable frametime spikes during frequent auto-hit bursts and repeated skill particle emission.
+
+## Latest verification
+- `npm run check` passes after the sprite-cache follow-up.
+- `npm run playtest:smoke` passes after the sprite-cache follow-up.
+## Update: water cache fix + soft-burst sprite cache
+- Fixed terrain-cache tile placement to use world-to-screen aligned local coordinates instead of stepping by `drawSize`, which had shifted cached terrain tiles off the real grid.
+- Restored animated water by drawing cached static terrain as the base layer and re-rendering only water tiles each frame with `sampleTerrainTile()`.
+- Added a separate cached sprite path for `drawSoftBurstParticle()`, so expensive blurred soft bursts used by skill VFX are now reused instead of rebuilt every frame.
+
+## Latest verification
+- `npm run check` passes after the water/sprite-cache fix.
+- `npm run playtest:smoke` passes after the water/sprite-cache fix.
