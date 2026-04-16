@@ -131,6 +131,18 @@
 
       <div id="fpsValue" class="fps-readout">FPS 0</div>
 
+      <div id="touchControls" class="touch-controls hidden" aria-hidden="true">
+        <div id="touchMoveZone" class="touch-move-zone">
+          <div id="touchJoystick" class="touch-joystick">
+            <div class="touch-joystick-ring"></div>
+            <div id="touchJoystickKnob" class="touch-joystick-knob"></div>
+          </div>
+        </div>
+        <button id="touchDashButton" class="touch-dash-button" type="button" aria-label="Dash">
+          <span class="touch-dash-label">Dash</span>
+        </button>
+      </div>
+
       <div id="levelUpOverlay" class="overlay hidden levelup-overlay">
         <div class="levelup-flash"></div>
         <div class="overlay-rays overlay-rays-level"></div>
@@ -208,6 +220,10 @@
     </div>
 
     <script src="game-config.js"></script>
+    <script src="game/foundation.js"></script>
+    <script src="game/runtime.js"></script>
+    <script src="game/render.js"></script>
+    <script src="game/debug.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

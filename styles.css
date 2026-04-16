@@ -40,6 +40,7 @@ body {
   width: 100vw;
   height: 100vh;
   background: #1b3829;
+  touch-action: none;
 }
 
 .hud {
@@ -460,6 +461,113 @@ body {
   text-transform: uppercase;
   color: rgba(232, 244, 228, 0.68);
   text-shadow: 0 0 6px rgba(4, 8, 7, 0.44);
+}
+
+.touch-controls {
+  position: fixed;
+  inset: auto 0 0 0;
+  min-height: 0;
+  pointer-events: none;
+  z-index: 23;
+}
+
+.touch-move-zone {
+  position: fixed;
+  left: 10px;
+  bottom: 8px;
+  width: 190px;
+  height: 190px;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-joystick,
+.touch-joystick-knob {
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
+
+.touch-joystick {
+  width: 104px;
+  height: 104px;
+  opacity: 0.74;
+  transition: opacity 120ms ease, transform 140ms ease;
+}
+
+.touch-joystick.is-active {
+  opacity: 1;
+}
+
+.touch-joystick-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(231, 245, 239, 0.26);
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.12), transparent 34%),
+    radial-gradient(circle at center, rgba(49, 84, 73, 0.44), rgba(15, 28, 23, 0.78) 70%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 10px 28px rgba(0, 0, 0, 0.24);
+}
+
+.touch-joystick-ring::after {
+  content: "";
+  position: absolute;
+  inset: 17px;
+  border-radius: 50%;
+  border: 1px dashed rgba(206, 232, 220, 0.22);
+}
+
+.touch-joystick-knob {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid rgba(246, 255, 252, 0.28);
+  background:
+    radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.28), transparent 36%),
+    linear-gradient(180deg, rgba(136, 214, 186, 0.92), rgba(67, 148, 125, 0.9));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 8px 20px rgba(15, 36, 30, 0.28),
+    0 0 22px rgba(120, 228, 190, 0.14);
+}
+
+.touch-dash-button {
+  position: fixed;
+  right: 16px;
+  bottom: 18px;
+  width: 84px;
+  height: 84px;
+  border: 1px solid rgba(248, 230, 158, 0.34);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 28%, rgba(255, 249, 214, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(72, 62, 24, 0.96), rgba(28, 25, 13, 0.96));
+  color: #f7e8b9;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: auto;
+  touch-action: manipulation;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 12px 30px rgba(0, 0, 0, 0.24);
+}
+
+.touch-dash-button.is-active {
+  transform: scale(0.96);
+  filter: brightness(1.08);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgba(255, 229, 152, 0.16),
+    0 0 26px rgba(255, 221, 120, 0.22);
+}
+
+.touch-dash-label {
+  display: inline-block;
+  transform: translateY(1px);
 }
 
 .skill-hud {
@@ -2443,6 +2551,106 @@ button.upgrade-row {
 
   .result-stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body.touch-ui-active .hud {
+    top: 8px;
+    left: 8px;
+    width: min(176px, calc(100vw - 108px));
+    grid-template-columns: repeat(2, minmax(78px, 1fr));
+    gap: 5px;
+  }
+
+  body.touch-ui-active .hud-item {
+    padding: 5px 6px;
+  }
+
+  body.touch-ui-active .hud strong {
+    font-size: 12px;
+  }
+
+  body.touch-ui-active .upgrades-button {
+    top: 8px;
+    right: 8px;
+    gap: 0;
+    padding: 7px 9px;
+  }
+
+  body.touch-ui-active .upgrades-button-label {
+    gap: 0;
+  }
+
+  body.touch-ui-active .button-hotkey,
+  body.touch-ui-active .dash-hotkey {
+    display: none;
+  }
+
+  body.touch-ui-active .boss-hud {
+    top: 8px;
+    width: min(320px, calc(100vw - 124px));
+  }
+
+  body.touch-ui-active .status-cluster {
+    left: 50%;
+    bottom: 102px;
+    width: min(360px, calc(100vw - 16px));
+    gap: 6px;
+    transform: translateX(-50%);
+  }
+
+  body.touch-ui-active .status-top,
+  body.touch-ui-active .status-main {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  body.touch-ui-active .status-side {
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  body.touch-ui-active .level-chip,
+  body.touch-ui-active .dash-hud,
+  body.touch-ui-active .bar-group {
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+
+  body.touch-ui-active .dash-hud {
+    min-width: 128px;
+  }
+
+  body.touch-ui-active .bar-head strong {
+    font-size: 14px;
+  }
+
+  body.touch-ui-active .skill-hud {
+    justify-content: center;
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+
+  body.touch-ui-active .skill-card {
+    width: 46px;
+    height: 46px;
+    border-radius: 9px;
+  }
+
+  body.touch-ui-active .skill-icon {
+    font-size: 22px;
+  }
+
+  body.touch-ui-active .skill-cd {
+    top: 4px;
+    right: 4px;
+    min-width: 18px;
+    padding: 1px 4px;
+    font-size: 8px;
+  }
+
+  body.touch-ui-active .fps-readout {
+    right: 8px;
+    bottom: 104px;
   }
 
   .skill-lab-panel {

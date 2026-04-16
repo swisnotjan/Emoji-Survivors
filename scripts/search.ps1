@@ -7,9 +7,21 @@ param(
 )
 
 $rg = Get-Command rg -ErrorAction SilentlyContinue
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$localRg = Join-Path $repoRoot "tools\\rg.exe"
+$rgCandidates = @()
+
+if (Test-Path $localRg) {
+  $rgCandidates += $localRg
+}
+
 if ($rg) {
+  $rgCandidates += $rg.Source
+}
+
+foreach ($rgCandidate in $rgCandidates) {
   try {
-    & $rg.Source -n --hidden --glob "!output/**" $Pattern $Path
+    & $rgCandidate -n --hidden --glob "!output/**" $Pattern $Path
     exit $LASTEXITCODE
   } catch {
   }

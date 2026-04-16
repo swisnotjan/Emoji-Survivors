@@ -3,14 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check app.js",
+    "check": "powershell -Command \"$files = 'game/foundation.js','game/runtime.js','game/render.js','game/debug.js','app.js'; foreach ($file in $files) { node --check $file; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }\"",
     "pages:prepare": "node scripts/prepare-pages.mjs",
+    "rg": "powershell -ExecutionPolicy Bypass -File scripts/rg.ps1",
     "serve": "node scripts/serve-static.mjs",
     "playtest:smoke": "node scripts/run-playtest.mjs --page index.html --scenario smoke",
     "playtest:skilllab": "node scripts/run-playtest.mjs --page skill-lab.html --scenario skilllab",
-    "verify:bosses": "node verify-boss-random-balance.mjs",
-    "verify:majors": "node verify-major-scaling.mjs",
-    "verify:telemetry": "node verify-telemetry-balance.mjs",
+    "verify:bosses": "node scripts/verify/verify-boss-random-balance.mjs",
+    "verify:majors": "node scripts/verify/verify-major-scaling.mjs",
+    "verify:telemetry": "node scripts/verify/verify-telemetry-balance.mjs",
     "search": "powershell -ExecutionPolicy Bypass -File scripts/search.ps1"
   }
 }
