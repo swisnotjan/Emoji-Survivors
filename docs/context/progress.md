@@ -1642,3 +1642,43 @@ ode verify-class-boss-focus.mjs passes and confirms locked class cards show enem
 ## Latest verification
 - `npm run check` passes after the water/sprite-cache fix.
 - `npm run playtest:smoke` passes after the water/sprite-cache fix.
+## Update: boss balance pass follow-up
+- Replaced boss-type selection with a weighted bag so boss runs stay random without clumping around the highest-weight entry.
+- Reworked `Grave Colossus` away from a mostly-stat/AoE profile by adding a `faultline` attack that creates long telegraphed stone lanes around the player.
+- Kept `Void Harbinger`'s behind-player blink, but reduced the unfairness by snapping blink placement to the player's movement-facing back arc and adding a post-blink barrage windup with locked aim.
+
+## Verification to run
+- `npm run check`
+- `npm run verify:bosses`
+- One gameplay smoke run to confirm the new `Colossus` telegraph reads cleanly in motion.
+## Update: full boss rework pass
+- Reworked each boss around a clearer role without introducing a new boss framework:
+  - `Countess`: fast strafe + repeated charge boss.
+  - `Colossus`: slow jump boss with real airborne animation and landing shockwaves.
+  - `Abyss Eye`: projectile rings + delayed danger zones, no summon-heavy overlap.
+  - `Matriarch`: summon-heavy spider pressure with brood/egg cadence.
+  - `Harbinger`: faster blink assassin with shorter windups and sharper punish windows.
+  - `Regent`: slow artillery boss built around spiral and radial projectile blooms.
+- Added real airborne rendering for enemy jumps via `enemy.airborne` + `enemy.visualHeight`, and contact damage now ignores airborne enemies so the `Colossus` jump stays fair.
+
+## Latest verification
+- `npm run check` passes after the full boss rework.
+- `npm run verify:bosses` passes after the full boss rework.
+- `npm run playtest:smoke` passes after the full boss rework.
+- Targeted visual verification:
+  - `output/web-game/verify-boss-rework/colossus-jump.png/.json` confirms `state: "jump-air"` in a live run.
+  - `output/web-game/verify-boss-rework/colossus-jump-onscreen.png` confirms the on-screen airborne sprite + shadow render.
+  - `output/web-game/verify-boss-random-balance/harbinger-check.png` and `regent-check.png` were reviewed after the rework.
+## Update: boss balance follow-up
+- `Countess`: widened the pause before the follow-up charge so the double-charge remains threatening but no longer feels guaranteed after the first hit.
+- `Colossus`: landing telegraph now previews the full maximum danger radius immediately, jump travel uses faster takeoff/landing with slower midair drift, chained second jumps start later, and phase 2 jumps less often overall.
+- `Abyss Eye`: phase 1 pressure increased through denser ring/beam cadence and a stronger overlap of rings with zones; projectile-facing visuals were unified to the same purple hostile palette.
+- `Matriarch`: boss HP reduced, brood/egg casts now move much less to remove jitter, and summon windows gained extra local danger so the encounter checks positioning instead of only boss focus.
+- `Regent`: phase 1 projectile density increased substantially and projectile colors were unified to the purple hostile palette.
+
+## Latest verification
+- `npm run check` passes after the boss balance follow-up.
+- `npm run verify:bosses` passes after the boss balance follow-up.
+- `npm run playtest:smoke` passes after the boss balance follow-up.
+- Boss HP was redistributed without changing the total six-boss HP budget: durability moved out of Regent/Harbinger/Matriarch and into Colossus so he is now the clear tankiest boss.
+- Brood Matriarch summon casts now lock to an anchor point and spawn brood farther from her center with brief separation immunity, specifically to remove the residual summon snap.

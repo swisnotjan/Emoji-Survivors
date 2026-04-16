@@ -195,6 +195,8 @@ function createInitialState(classId = "wind") {
       encounterIndex: 0,
       nextTime: rollBossEncounterDelay(0),
       warningLead: 9,
+      bag: [],
+      bagSignature: "",
     },
     lastBossType: null,
     spawnDirector: {
@@ -2195,6 +2197,49 @@ function maybeSpawnBosses() {
   }
 }
 
+function buildBossBagSignature(eligible) {
+  return eligible.map((type) => `${type}:${state.bossDefeats[type] ?? 0}`).join("|");
+}
+
+function buildWeightedBossBag(eligible, atTime) {
+  const bag = [];
+  for (const type of eligible) {
+    const baseWeight = BOSS_RANDOM_WEIGHTS[type] ?? 1;
+    const defeatCount = state.bossDefeats[type] ?? 0;
+    const unlockTime = BOSS_UNLOCK_TIMES[type] ?? 0;
+    const timeSinceUnlock = Math.max(0, atTime - unlockTime);
+    const freshnessBias = 1 + Math.min(0.32, timeSinceUnlock / 900);
+    const defeatPenalty = 1 / (1 + defeatCount * 0.9);
+    const tickets = Math.max(1, Math.round(baseWeight * freshnessBias * defeatPenalty * 2));
+    for (let i = 0; i < tickets; i += 1) {
+      bag.push(type);
+    }
+  }
+
+  for (let i = bag.length - 1; i > 0; i -= 1) {
+    const swapIndex = Math.floor(Math.random() * (i + 1));
+    const current = bag[i];
+    bag[i] = bag[swapIndex];
+    bag[swapIndex] = current;
+  }
+
+  return bag;
+}
+
+function ensureBossBag(atTime, eligible) {
+  const director = state.bossDirector;
+  const signature = buildBossBagSignature(eligible);
+  const filteredBag = director.bag.filter((type) => eligible.includes(type));
+
+  if (signature !== director.bagSignature || filteredBag.length === 0) {
+    director.bag = buildWeightedBossBag(eligible, atTime);
+    director.bagSignature = signature;
+    return;
+  }
+
+  director.bag = filteredBag;
+}
+
 function pickRandomBossType(atTime = state.elapsed) {
   const eligible = getEligibleBossTypes(atTime);
 
@@ -2202,36 +2247,19 @@ function pickRandomBossType(atTime = state.elapsed) {
     return null;
   }
 
-  let pool = eligible;
+  ensureBossBag(atTime, eligible);
+
+  const director = state.bossDirector;
+  let bagIndex = 0;
   if (eligible.length > 1 && state.lastBossType) {
-    const withoutRepeat = eligible.filter((type) => type !== state.lastBossType);
-    if (withoutRepeat.length > 0) {
-      pool = withoutRepeat;
+    const nonRepeatIndex = director.bag.findIndex((type) => type !== state.lastBossType);
+    if (nonRepeatIndex >= 0) {
+      bagIndex = nonRepeatIndex;
     }
   }
 
-  let totalWeight = 0;
-  const weightedPool = pool.map((type) => {
-    const baseWeight = BOSS_RANDOM_WEIGHTS[type] ?? 1;
-    const defeatCount = state.bossDefeats[type] ?? 0;
-    const unlockTime = BOSS_UNLOCK_TIMES[type] ?? 0;
-    const timeSinceUnlock = Math.max(0, atTime - unlockTime);
-    const freshnessBias = 1 + Math.min(0.32, timeSinceUnlock / 900);
-    const defeatPenalty = 1 / (1 + defeatCount * 0.9);
-    const weight = baseWeight * freshnessBias * defeatPenalty;
-    totalWeight += weight;
-    return { type, weight };
-  });
-
-  let roll = Math.random() * totalWeight;
-  for (const entry of weightedPool) {
-    roll -= entry.weight;
-    if (roll <= 0) {
-      return entry.type;
-    }
-  }
-
-  return weightedPool[weightedPool.length - 1]?.type ?? pool[pool.length - 1] ?? null;
+  const [pickedType] = director.bag.splice(bagIndex, 1);
+  return pickedType ?? eligible[0] ?? null;
 }
 
 function scheduleNextBossEncounter(baseTime = state.elapsed) {
@@ -2241,6 +2269,11 @@ function scheduleNextBossEncounter(baseTime = state.elapsed) {
     return;
   }
   const director = state.bossDirector;
+  director.bag = director.bag.filter((type) => eligible.includes(type));
+  if (buildBossBagSignature(eligible) !== director.bagSignature) {
+    director.bag = [];
+    director.bagSignature = "";
+  }
   director.nextTime = baseTime + rollBossEncounterDelay(director.encounterIndex);
 }
 
@@ -2284,7 +2317,7 @@ function createEnemy(enemyType, anchor, index, totalCount, options = {}) {
 
   if (totalCount > 1) {
     const angle = (index / totalCount) * Math.PI * 2 + randRange(-0.35, 0.35);
-    const spread = randRange(16, 56);
+    const spread = randRange(options.spawnDistanceMin ?? 16, options.spawnDistanceMax ?? 56);
     x += Math.cos(angle) * spread;
     y += Math.sin(angle) * spread;
   }
@@ -2363,6 +2396,9 @@ function createEnemy(enemyType, anchor, index, totalCount, options = {}) {
     pathTargetY: null,
     pathTimer: 0,
     pathSide: Math.random() < 0.5 ? -1 : 1,
+    noSeparationTimer: 0,
+    airborne: false,
+    visualHeight: 0,
     dead: false,
   };
 }
@@ -2431,6 +2467,7 @@ function updateEnemiesAndSpatialGrid(dt) {
     enemy.necroMarkTimer = Math.max(0, enemy.necroMarkTimer - dt);
     enemy.bloodMarkTimer = Math.max(0, enemy.bloodMarkTimer - dt);
     enemy.hasteTimer = Math.max(0, enemy.hasteTimer - dt);
+    enemy.noSeparationTimer = Math.max(0, (enemy.noSeparationTimer ?? 0) - dt);
     if (enemy.hasteTimer <= 0) {
       enemy.hasteAmount = 0;
     }
@@ -2929,12 +2966,13 @@ function updateBulwarkEnemy(enemy, dt, moveMultiplier, player) {
 }
 
 function updateCountessBoss(enemy, dt, moveMultiplier, player) {
+  const countessProjectileColor = HOSTILE_ARCANE_COLOR;
   if (!enemy.phaseTriggered && enemy.hp <= enemy.maxHp * 0.58) {
     enemy.phaseTriggered = true;
     enemy.phase = 2;
     enemy.state = "phase-shift";
-    enemy.stateTimer = 0.62;
-    enemy.attackCooldown = Math.max(enemy.attackCooldown, 1.05);
+    enemy.stateTimer = 0.46;
+    enemy.attackCooldown = Math.max(enemy.attackCooldown, 0.8);
     enemy.secondaryTriggered = false;
     enemy.knockbackVX = 0;
     enemy.knockbackVY = 0;
@@ -2945,239 +2983,272 @@ function updateCountessBoss(enemy, dt, moveMultiplier, player) {
   }
 
   if (enemy.state === "phase-shift") {
-    holdEnemyBand(enemy, player, 320, 450, enemy.speed * 0.26 * moveMultiplier, dt);
+    holdEnemyBand(enemy, player, 240, 360, enemy.speed * 0.8 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
       enemy.state = "recover";
-      enemy.stateTimer = 0.42;
-      enemy.attackCooldown = Math.max(enemy.attackCooldown, 1.1);
+      enemy.stateTimer = 0.24;
+      enemy.attackCooldown = Math.max(enemy.attackCooldown, 0.75);
     }
     return;
   }
 
-  if (enemy.state === "nova") {
-    holdEnemyBand(enemy, player, 320, 460, enemy.speed * 0.34 * moveMultiplier, dt);
+  if (enemy.state === "strafe-shot") {
+    holdEnemyBand(enemy, player, 250, 390, enemy.speed * 0.9 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
-      spawnBossRadial(enemy, enemy.phase === 1 ? 14 : 22, enemy.phase === 1 ? 300 : 348, enemy.phase === 1 ? 16 : 20, "rgba(255, 109, 142, {a})");
-      enemy.state = "recover";
-      enemy.stateTimer = 0.36;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.15 : 1.45;
-    }
-    return;
-  }
-
-  if (enemy.state === "volley") {
-    holdEnemyBand(enemy, player, 320, 460, enemy.speed * 0.55 * moveMultiplier, dt);
-    if (enemy.stateTimer <= 0) {
-      const arcCount = enemy.phase === 1 ? 11 : 15;
-      spawnBossFan(enemy, player, arcCount, enemy.phase === 1 ? 0.86 : 1.06, enemy.phase === 1 ? 360 : 390, enemy.phase === 1 ? 18 : 22, "rgba(255, 116, 144, {a})");
-      enemy.state = "recover";
-      enemy.stateTimer = 0.3;
-      enemy.attackCooldown = enemy.phase === 1 ? 1.95 : 1.38;
-    }
-    return;
-  }
-
-  if (enemy.state === "swoop-windup") {
-    holdEnemyBand(enemy, player, 320, 450, enemy.speed * 0.3 * moveMultiplier, dt);
-    if (enemy.stateTimer <= 0) {
-      enemy.state = "swoop";
-      enemy.stateTimer = enemy.phase === 1 ? 0.46 : 0.54;
-    }
-    return;
-  }
-
-  if (enemy.state === "swoop") {
-    moveEnemyVector(enemy, enemy.memoryX, enemy.memoryY, enemy.speed * (enemy.phase === 1 ? 5.5 : 6.25) * moveMultiplier, dt);
-    if (enemy.stateTimer < 0.24 && !enemy.secondaryTriggered) {
-      enemy.secondaryTriggered = true;
-      spawnBossFan(enemy, player, enemy.phase === 1 ? 6 : 8, enemy.phase === 1 ? 0.52 : 0.64, 300, enemy.phase === 1 ? 14 : 18, "rgba(255, 109, 142, {a})");
-    }
-    if (enemy.stateTimer <= 0) {
-      enemy.state = "recover";
-      enemy.stateTimer = 0.38;
-      enemy.attackCooldown = enemy.phase === 1 ? 1.9 : 1.28;
-    }
-    return;
-  }
-
-  if (enemy.state === "summon") {
-    holdEnemyBand(enemy, player, 320, 470, enemy.speed * 0.42 * moveMultiplier, dt);
-    if (enemy.stateTimer <= 0) {
-      spawnBossMinions(
+      spawnBossFan(
         enemy,
-        enemy.phase === 1
-          ? ["runner", "runner", "runner", "fang", "grunt", "grunt"]
-          : ["runner", "runner", "fang", "fang", "hexer", "hexer", "grunt"]
+        player,
+        enemy.phase === 1 ? 5 : 6,
+        enemy.phase === 1 ? 0.48 : 0.62,
+        enemy.phase === 1 ? 330 : 370,
+        enemy.phase === 1 ? 14 : 18,
+        countessProjectileColor
       );
       enemy.state = "recover";
-      enemy.stateTimer = 0.34;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.3 : 1.62;
+      enemy.stateTimer = 0.22;
+      enemy.attackCooldown = enemy.phase === 1 ? 1.45 : 1.05;
+    }
+    return;
+  }
+
+  if (enemy.state === "charge-windup") {
+    holdEnemyBand(enemy, player, 230, 360, enemy.speed * 0.72 * moveMultiplier, dt);
+    if (enemy.stateTimer <= 0) {
+      const dx = player.x - enemy.x;
+      const dy = player.y - enemy.y;
+      const length = Math.hypot(dx, dy) || 1;
+      enemy.memoryX = dx / length;
+      enemy.memoryY = dy / length;
+      enemy.secondaryTriggered = false;
+      enemy.state = "charge";
+      enemy.stateTimer = enemy.phase === 1 ? 0.3 : 0.36;
+    }
+    return;
+  }
+
+  if (enemy.state === "charge") {
+    moveEnemyVector(enemy, enemy.memoryX, enemy.memoryY, enemy.speed * (enemy.phase === 1 ? 6.6 : 7.2) * moveMultiplier, dt);
+    if (enemy.stateTimer < (enemy.phase === 1 ? 0.16 : 0.22) && !enemy.secondaryTriggered) {
+      enemy.secondaryTriggered = true;
+      spawnBossFan(
+        enemy,
+        player,
+        enemy.phase === 1 ? 4 : 5,
+        enemy.phase === 1 ? 0.34 : 0.46,
+        enemy.phase === 1 ? 320 : 360,
+        enemy.phase === 1 ? 12 : 16,
+        countessProjectileColor
+      );
+    }
+    if (enemy.stateTimer <= 0) {
+      enemy.memoryBurstsLeft = Math.max(0, (enemy.memoryBurstsLeft ?? 1) - 1);
+      if ((enemy.memoryBurstsLeft ?? 0) > 0) {
+        enemy.state = "charge-windup";
+        enemy.stateTimer = enemy.phase === 1 ? 0.48 : 0.46;
+        spawnLineEffect(enemy.x, enemy.y, player.x, player.y, enemy.stateTimer, countessProjectileColor, 10);
+        spawnChannelEffect(enemy.x, enemy.y, countessProjectileColor, 28, enemy.stateTimer);
+      } else {
+        enemy.state = "recover";
+        enemy.stateTimer = 0.26;
+        enemy.attackCooldown = enemy.phase === 1 ? 1.4 : 0.95;
+      }
     }
     return;
   }
 
   if (enemy.state === "recover") {
-    holdEnemyBand(enemy, player, 320, 450, enemy.speed * 0.55 * moveMultiplier, dt);
+    holdEnemyBand(enemy, player, 250, 390, enemy.speed * 0.95 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
       enemy.state = "idle";
     }
     return;
   }
 
-  holdEnemyBand(enemy, player, 320, 450, enemy.speed * moveMultiplier, dt);
+  holdEnemyBand(enemy, player, 250, 390, enemy.speed * 0.82 * moveMultiplier, dt);
   if (enemy.attackCooldown > 0) {
     return;
   }
 
-  const pattern = enemy.phase === 1 ? ["volley", "swoop", "summon", "nova", "volley"] : ["volley", "swoop", "nova", "volley", "summon", "nova"];
+  const pattern = enemy.phase === 1
+    ? ["charge", "strafe-shot", "charge", "strafe-shot"]
+    : ["charge", "strafe-shot", "charge", "charge", "strafe-shot"];
   const nextIndex = (enemy.patternIndex + 1 + pattern.length) % pattern.length;
   const nextPattern = pattern[nextIndex];
   enemy.patternIndex = nextIndex;
 
-  if (nextPattern === "volley") {
-    enemy.state = "volley";
-    enemy.stateTimer = enemy.phase === 1 ? 0.66 : 0.52;
-    spawnChannelEffect(enemy.x, enemy.y, "rgba(255, 109, 142, {a})", 34, enemy.stateTimer);
-  } else if (nextPattern === "swoop") {
-    enemy.state = "swoop-windup";
-    enemy.stateTimer = enemy.phase === 1 ? 0.68 : 0.58;
-    const dx = player.x - enemy.x;
-    const dy = player.y - enemy.y;
-    const length = Math.hypot(dx, dy) || 1;
-    enemy.memoryX = dx / length;
-    enemy.memoryY = dy / length;
-    enemy.secondaryTriggered = false;
-    spawnLineEffect(enemy.x, enemy.y, player.x, player.y, enemy.stateTimer, "rgba(255, 109, 142, {a})", 11);
-  } else if (nextPattern === "nova") {
-    enemy.state = "nova";
-    enemy.stateTimer = enemy.phase === 1 ? 0.72 : 0.6;
-    spawnChannelEffect(enemy.x, enemy.y, "rgba(255, 109, 142, {a})", 44, enemy.stateTimer);
+  if (nextPattern === "charge") {
+    enemy.memoryBurstsLeft = enemy.phase === 1 ? 1 : 2;
+    enemy.state = "charge-windup";
+    enemy.stateTimer = enemy.phase === 1 ? 0.52 : 0.5;
+    spawnLineEffect(enemy.x, enemy.y, player.x, player.y, enemy.stateTimer, countessProjectileColor, 11);
+    spawnChannelEffect(enemy.x, enemy.y, countessProjectileColor, 34, enemy.stateTimer);
   } else {
-    enemy.state = "summon";
-    enemy.stateTimer = enemy.phase === 1 ? 0.78 : 0.64;
-    spawnChannelEffect(enemy.x, enemy.y, "rgba(255, 109, 142, {a})", 40, enemy.stateTimer);
+    enemy.state = "strafe-shot";
+    enemy.stateTimer = enemy.phase === 1 ? 0.42 : 0.34;
+    spawnChannelEffect(enemy.x, enemy.y, countessProjectileColor, 28, enemy.stateTimer);
   }
 }
 
 function updateColossusBoss(enemy, dt, moveMultiplier, player) {
+  const maxLandingRadius = enemy.phase === 1 ? 392 : 516;
   if (!enemy.phaseTriggered && enemy.hp <= enemy.maxHp * 0.56) {
     enemy.phaseTriggered = true;
     enemy.phase = 2;
+    enemy.state = "phase-shift";
+    enemy.stateTimer = 0.5;
+    enemy.attackCooldown = Math.max(enemy.attackCooldown, 0.9);
     spawnBossPhaseEffect(enemy.x, enemy.y, "rgba(242, 183, 109, {a})");
   }
 
-  if (enemy.state === "quake") {
-    moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.26 * moveMultiplier, dt);
+  if (enemy.state === "phase-shift") {
+    moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.14 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
-      const arcs = enemy.phase === 1 ? 3 : 4;
-      for (let i = 0; i < arcs; i += 1) {
+      enemy.state = "recover";
+      enemy.stateTimer = 0.34;
+      enemy.attackCooldown = Math.max(enemy.attackCooldown, 0.9);
+    }
+    return;
+  }
+
+  if (enemy.state === "jump-windup") {
+    moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.16 * moveMultiplier, dt);
+    if (enemy.stateTimer <= 0) {
+      enemy.airborne = true;
+      enemy.visualHeight = 0;
+      enemy.jumpStartX = enemy.x;
+      enemy.jumpStartY = enemy.y;
+      enemy.jumpTotalTime = enemy.phase === 1 ? 1.12 : 1.18;
+      enemy.state = "jump-air";
+      enemy.stateTimer = enemy.jumpTotalTime;
+      enemy.knockbackVX = 0;
+      enemy.knockbackVY = 0;
+    }
+    return;
+  }
+
+  if (enemy.state === "jump-air") {
+    enemy.airborne = true;
+    enemy.knockbackVX = 0;
+    enemy.knockbackVY = 0;
+    const totalTime = enemy.jumpTotalTime || 0.8;
+    const progress = clamp(1 - enemy.stateTimer / totalTime, 0, 1);
+    enemy.x = enemy.jumpStartX + (enemy.memoryX - enemy.jumpStartX) * progress;
+    enemy.y = enemy.jumpStartY + (enemy.memoryY - enemy.jumpStartY) * progress;
+    const riseFall = Math.sin(progress * Math.PI);
+    const sculptedHeight = progress < 0.5
+      ? Math.pow(riseFall, 0.38)
+      : Math.pow(riseFall, 0.26);
+    enemy.visualHeight = sculptedHeight * (enemy.phase === 1 ? 144 : 172);
+    if (enemy.stateTimer <= 0) {
+      enemy.airborne = false;
+      enemy.visualHeight = 0;
+      enemy.x = enemy.memoryX;
+      enemy.y = enemy.memoryY;
+      const waves = enemy.phase === 1 ? 2 : 3;
+      spawnEnemyBurst(enemy.x, enemy.y, {
+        radius: enemy.phase === 1 ? 124 : 148,
+        telegraphTime: 0.05,
+        damage: enemy.phase === 1 ? 22 : 28,
+        color: "rgba(242, 183, 109, {a})",
+      });
+      for (let i = 0; i < waves; i += 1) {
         spawnShockwave(enemy.x, enemy.y, {
-          telegraphTime: 0.84 + i * 0.18,
-          radius: enemy.phase === 1 ? 420 + i * 44 : 450 + i * 42,
-          speed: enemy.phase === 1 ? 470 : 520,
-          thickness: enemy.phase === 1 ? 20 : 22,
-          damage: enemy.phase === 1 ? 24 : 31,
+          telegraphTime: 0.14 + i * 0.12,
+          radius: enemy.phase === 1 ? 320 + i * 72 : 360 + i * 78,
+          speed: enemy.phase === 1 ? 430 : 470,
+          thickness: enemy.phase === 1 ? 20 : 24,
+          damage: enemy.phase === 1 ? 24 : 30,
+          color: "rgba(242, 183, 109, {a})",
+        });
+      }
+      enemy.memoryBurstsLeft = Math.max(0, (enemy.memoryBurstsLeft ?? 1) - 1);
+      if ((enemy.memoryBurstsLeft ?? 0) > 0) {
+        const aimX = player.x + player.lastMoveX * 90 + randRange(-50, 50);
+        const aimY = player.y + player.lastMoveY * 90 + randRange(-50, 50);
+        enemy.memoryX = clamp(aimX, WORLD.left + enemy.radius, WORLD.right - enemy.radius);
+        enemy.memoryY = clamp(aimY, WORLD.top + enemy.radius, WORLD.bottom - enemy.radius);
+        enemy.state = "jump-windup";
+        enemy.stateTimer = enemy.phase === 1 ? 0.86 : 1.02;
+        spawnLineEffect(enemy.x, enemy.y, enemy.memoryX, enemy.memoryY, enemy.stateTimer, "rgba(242, 183, 109, {a})", 10);
+        spawnEnemyBurst(enemy.memoryX, enemy.memoryY, {
+          radius: maxLandingRadius,
+          telegraphTime: enemy.stateTimer,
+          damage: 0,
+          color: "rgba(242, 183, 109, {a})",
+        });
+      } else {
+        enemy.state = "recover";
+        enemy.stateTimer = enemy.phase === 1 ? 0.54 : 0.64;
+        enemy.attackCooldown = enemy.phase === 1 ? 2.65 : 3.1;
+      }
+    }
+    return;
+  }
+
+  if (enemy.state === "ground-slam") {
+    moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.18 * moveMultiplier, dt);
+    if (enemy.stateTimer <= 0) {
+      const waveCount = enemy.phase === 1 ? 2 : 3;
+      for (let i = 0; i < waveCount; i += 1) {
+        spawnShockwave(enemy.x, enemy.y, {
+          telegraphTime: 0.08 + i * 0.14,
+          radius: enemy.phase === 1 ? 260 + i * 86 : 300 + i * 92,
+          speed: enemy.phase === 1 ? 440 : 480,
+          thickness: enemy.phase === 1 ? 18 : 22,
+          damage: enemy.phase === 1 ? 20 : 26,
           color: "rgba(242, 183, 109, {a})",
         });
       }
       enemy.state = "recover";
-      enemy.stateTimer = 0.44;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.45 : 1.72;
-    }
-    return;
-  }
-
-  if (enemy.state === "slam") {
-    if (enemy.stateTimer <= 0) {
-      spawnShockwave(enemy.x, enemy.y, {
-        telegraphTime: 0.92,
-        radius: enemy.phase === 1 ? 470 : 520,
-        speed: enemy.phase === 1 ? 500 : 540,
-        thickness: enemy.phase === 1 ? 22 : 24,
-        damage: enemy.phase === 1 ? 26 : 34,
-        color: "rgba(242, 183, 109, {a})",
-      });
-      enemy.state = "recover";
-      enemy.stateTimer = 0.42;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.55 : 1.78;
-    }
-    return;
-  }
-
-  if (enemy.state === "meteor") {
-    if (enemy.stateTimer <= 0) {
-      const impacts = enemy.phase === 1 ? 7 : 10;
-      for (let i = 0; i < impacts; i += 1) {
-        const angle = (i / impacts) * Math.PI * 2 + randRange(-0.45, 0.45);
-        const distance = randRange(60, enemy.phase === 1 ? 240 : 300);
-        spawnMeteorStrike(player.x + Math.cos(angle) * distance, player.y + Math.sin(angle) * distance, {
-          telegraphTime: 0.9 + i * 0.08,
-          radius: 42 + (i % 3) * 6,
-          damage: enemy.phase === 1 ? 22 : 29,
-          color: "rgba(255, 140, 94, {a})",
-        });
-      }
-      enemy.state = "recover";
-      enemy.stateTimer = 0.42;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.55 : 1.84;
-    }
-    return;
-  }
-
-  if (enemy.state === "summon") {
-    moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.35 * moveMultiplier, dt);
-    if (enemy.stateTimer <= 0) {
-      spawnBossMinions(
-        enemy,
-        enemy.phase === 1
-          ? ["tank", "grunt", "grunt", "brood", "runner"]
-          : ["tank", "tank", "hexer", "brood", "wraith", "runner"]
-      );
-      enemy.state = "recover";
-      enemy.stateTimer = 0.44;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.7 : 1.95;
+      enemy.stateTimer = 0.34;
+      enemy.attackCooldown = enemy.phase === 1 ? 2.05 : 1.9;
     }
     return;
   }
 
   if (enemy.state === "recover") {
-    moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.45 * moveMultiplier, dt);
+    moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.26 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
       enemy.state = "idle";
     }
     return;
   }
 
-  moveEnemyToward(enemy, player.x, player.y, enemy.speed * moveMultiplier, dt);
+  moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.34 * moveMultiplier, dt);
   if (enemy.attackCooldown > 0) {
     return;
   }
 
-  const pattern = enemy.phase === 1 ? ["slam", "meteor", "summon", "quake", "slam"] : ["slam", "quake", "meteor", "slam", "summon", "quake"];
+  const pattern = enemy.phase === 1 ? ["jump", "ground-slam", "jump"] : ["jump", "ground-slam", "jump"];
   const nextIndex = (enemy.patternIndex + 1 + pattern.length) % pattern.length;
   const nextPattern = pattern[nextIndex];
   enemy.patternIndex = nextIndex;
 
-  if (nextPattern === "slam") {
-    enemy.state = "slam";
-    enemy.stateTimer = enemy.phase === 1 ? 0.62 : 0.54;
-    spawnChannelEffect(enemy.x, enemy.y, "rgba(242, 183, 109, {a})", 44, enemy.stateTimer);
-  } else if (nextPattern === "quake") {
-    enemy.state = "quake";
-    enemy.stateTimer = enemy.phase === 1 ? 0.76 : 0.62;
-    spawnChannelEffect(enemy.x, enemy.y, "rgba(242, 183, 109, {a})", 56, enemy.stateTimer);
-  } else if (nextPattern === "meteor") {
-    enemy.state = "meteor";
-    enemy.stateTimer = enemy.phase === 1 ? 0.72 : 0.6;
-    spawnChannelEffect(enemy.x, enemy.y, "rgba(255, 140, 94, {a})", 46, enemy.stateTimer);
+  if (nextPattern === "jump") {
+    const aimX = player.x + player.lastMoveX * 90 + randRange(-70, 70);
+    const aimY = player.y + player.lastMoveY * 90 + randRange(-70, 70);
+    enemy.memoryX = clamp(aimX, WORLD.left + enemy.radius, WORLD.right - enemy.radius);
+    enemy.memoryY = clamp(aimY, WORLD.top + enemy.radius, WORLD.bottom - enemy.radius);
+    enemy.memoryBurstsLeft = enemy.phase === 1 ? 1 : 2;
+    enemy.state = "jump-windup";
+    enemy.stateTimer = enemy.phase === 1 ? 1.02 : 1.16;
+    spawnLineEffect(enemy.x, enemy.y, enemy.memoryX, enemy.memoryY, enemy.stateTimer, "rgba(242, 183, 109, {a})", 11);
+    spawnEnemyBurst(enemy.memoryX, enemy.memoryY, {
+      radius: maxLandingRadius,
+      telegraphTime: enemy.stateTimer,
+      damage: 0,
+      color: "rgba(242, 183, 109, {a})",
+    });
+    spawnChannelEffect(enemy.x, enemy.y, "rgba(242, 183, 109, {a})", 54, enemy.stateTimer);
   } else {
-    enemy.state = "summon";
-    enemy.stateTimer = enemy.phase === 1 ? 0.76 : 0.64;
-    spawnChannelEffect(enemy.x, enemy.y, "rgba(242, 183, 109, {a})", 42, enemy.stateTimer);
+    enemy.state = "ground-slam";
+    enemy.stateTimer = enemy.phase === 1 ? 0.7 : 0.58;
+    spawnChannelEffect(enemy.x, enemy.y, "rgba(242, 183, 109, {a})", 48, enemy.stateTimer);
   }
 }
 
 function updateAbyssBoss(enemy, dt, moveMultiplier, player) {
+  const abyssProjectileColor = "rgba(173, 116, 255, {a})";
   if (!enemy.phaseTriggered && enemy.hp <= enemy.maxHp * 0.58) {
     enemy.phaseTriggered = true;
     enemy.phase = 2;
@@ -3192,7 +3263,7 @@ function updateAbyssBoss(enemy, dt, moveMultiplier, player) {
         activeTime: enemy.phase === 1 ? 0.36 : 0.5,
         width: enemy.phase === 1 ? 44 : 58,
         damage: enemy.phase === 1 ? 28 : 35,
-        color: "rgba(145, 162, 255, {a})",
+        color: abyssProjectileColor,
       });
       if (enemy.phase === 2) {
         spawnBeamAttack(enemy.x, enemy.y, player.x, player.y, {
@@ -3200,61 +3271,96 @@ function updateAbyssBoss(enemy, dt, moveMultiplier, player) {
           activeTime: 0.4,
           width: 52,
           damage: 30,
-          color: "rgba(145, 162, 255, {a})",
+          color: abyssProjectileColor,
         });
         spawnEnemyBurst(player.x, player.y, {
           radius: 88,
           telegraphTime: 0.82,
           damage: 22,
-          color: "rgba(145, 162, 255, {a})",
+          color: abyssProjectileColor,
         });
       }
       enemy.state = "recover";
       enemy.stateTimer = 0.36;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.1 : 1.42;
+      enemy.attackCooldown = enemy.phase === 1 ? 1.7 : 1.42;
+    }
+    return;
+  }
+
+  if (enemy.state === "zones") {
+    holdEnemyBand(enemy, player, 450, 650, enemy.speed * 0.3 * moveMultiplier, dt);
+    if (enemy.stateTimer <= 0) {
+      const forwardX = player.lastMoveX || Math.cos(state.elapsed * 0.7);
+      const forwardY = player.lastMoveY || Math.sin(state.elapsed * 0.7);
+      const forwardLength = Math.hypot(forwardX, forwardY) || 1;
+      const sideX = -forwardY / forwardLength;
+      const sideY = forwardX / forwardLength;
+      const anchors = [
+        { x: player.x + (forwardX / forwardLength) * 86, y: player.y + (forwardY / forwardLength) * 86, radius: 82, delay: 0.6 },
+        { x: player.x + sideX * 124, y: player.y + sideY * 124, radius: 74, delay: 0.7 },
+        { x: player.x - sideX * 124, y: player.y - sideY * 124, radius: 74, delay: 0.7 },
+      ];
+      if (enemy.phase === 2) {
+        anchors.push(
+          { x: player.x - (forwardX / forwardLength) * 118, y: player.y - (forwardY / forwardLength) * 118, radius: 88, delay: 0.82 },
+          { x: player.x + sideX * 210, y: player.y + sideY * 210, radius: 68, delay: 0.9 }
+        );
+      }
+      for (const anchor of anchors) {
+        spawnEnemyBurst(anchor.x, anchor.y, {
+          radius: anchor.radius,
+          telegraphTime: anchor.delay,
+          damage: enemy.phase === 1 ? 18 : 23,
+          color: abyssProjectileColor,
+        });
+      }
+      enemy.state = "recover";
+      enemy.stateTimer = 0.32;
+      enemy.attackCooldown = enemy.phase === 1 ? 1.55 : 1.35;
     }
     return;
   }
 
   if (enemy.state === "ring") {
-    holdEnemyBand(enemy, player, 450, 650, enemy.speed * 0.3 * moveMultiplier, dt);
+    holdEnemyBand(enemy, player, 450, 650, enemy.speed * 0.28 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
-      spawnBossRadial(enemy, enemy.phase === 1 ? 18 : 28, enemy.phase === 1 ? 280 : 350, enemy.phase === 1 ? 15 : 19, "rgba(145, 162, 255, {a})");
+      const primaryCount = enemy.phase === 1 ? 22 : 24;
+      spawnBossRadial(enemy, primaryCount, enemy.phase === 1 ? 305 : 330, enemy.phase === 1 ? 16 : 19, abyssProjectileColor);
       if (enemy.phase === 2) {
-        const sideAngle = Math.atan2(player.y - enemy.y, player.x - enemy.x) + Math.PI * 0.5;
-        const sideDistance = 124;
-        spawnEnemyBurst(player.x + Math.cos(sideAngle) * sideDistance, player.y + Math.sin(sideAngle) * sideDistance, {
+        const secondaryCount = 12;
+        const offset = Math.PI / secondaryCount;
+        for (let i = 0; i < secondaryCount; i += 1) {
+          const angle = (i / secondaryCount) * Math.PI * 2 + offset;
+          state.enemyAttacks.push({
+            kind: "projectile",
+            x: enemy.x,
+            y: enemy.y,
+            vx: Math.cos(angle) * 390,
+            vy: Math.sin(angle) * 390,
+            radius: 7.5,
+            damage: 17,
+            color: abyssProjectileColor,
+            life: 3.6,
+            dead: false,
+          });
+        }
+        spawnEnemyBurst(player.x, player.y, {
           radius: 72,
-          telegraphTime: 0.72,
-          damage: 20,
-          color: "rgba(145, 162, 255, {a})",
+          telegraphTime: 0.7,
+          damage: 18,
+          color: abyssProjectileColor,
         });
-        spawnEnemyBurst(player.x - Math.cos(sideAngle) * sideDistance, player.y - Math.sin(sideAngle) * sideDistance, {
-          radius: 72,
-          telegraphTime: 0.72,
-          damage: 20,
-          color: "rgba(145, 162, 255, {a})",
+      } else {
+        spawnEnemyBurst(player.x, player.y, {
+          radius: 62,
+          telegraphTime: 0.64,
+          damage: 16,
+          color: abyssProjectileColor,
         });
       }
       enemy.state = "recover";
       enemy.stateTimer = 0.3;
-      enemy.attackCooldown = enemy.phase === 1 ? 1.85 : 1.28;
-    }
-    return;
-  }
-
-  if (enemy.state === "summon") {
-    holdEnemyBand(enemy, player, 430, 640, enemy.speed * 0.2 * moveMultiplier, dt);
-    if (enemy.stateTimer <= 0) {
-      spawnBossMinions(
-        enemy,
-        enemy.phase === 1
-          ? ["hexer", "hexer", "oracle", "oracle", "wraith"]
-          : ["hexer", "hexer", "oracle", "oracle", "wraith", "wraith", "fang"]
-      );
-      enemy.state = "recover";
-      enemy.stateTimer = 0.38;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.25 : 1.55;
+      enemy.attackCooldown = enemy.phase === 1 ? 1.45 : 1.22;
     }
     return;
   }
@@ -3272,155 +3378,203 @@ function updateAbyssBoss(enemy, dt, moveMultiplier, player) {
     return;
   }
 
-  const pattern = enemy.phase === 1 ? ["ring", "beam", "summon", "ring", "beam"] : ["beam", "ring", "summon", "beam", "ring", "summon"];
+  const pattern = enemy.phase === 1 ? ["ring", "beam", "zones", "ring", "beam"] : ["beam", "zones", "ring", "beam", "zones"];
   const nextIndex = (enemy.patternIndex + 1 + pattern.length) % pattern.length;
   const nextPattern = pattern[nextIndex];
   enemy.patternIndex = nextIndex;
 
   if (nextPattern === "beam") {
     enemy.state = "beam";
-    enemy.stateTimer = enemy.phase === 1 ? 0.7 : 0.56;
+    enemy.stateTimer = enemy.phase === 1 ? 0.62 : 0.56;
     enemy.memoryX = player.x;
     enemy.memoryY = player.y;
-    spawnLineEffect(enemy.x, enemy.y, player.x, player.y, enemy.stateTimer, "rgba(145, 162, 255, {a})", enemy.phase === 1 ? 12 : 16);
-    spawnChannelEffect(enemy.x, enemy.y, "rgba(145, 162, 255, {a})", 40, enemy.stateTimer);
+    spawnLineEffect(enemy.x, enemy.y, player.x, player.y, enemy.stateTimer, abyssProjectileColor, enemy.phase === 1 ? 12 : 16);
+    spawnChannelEffect(enemy.x, enemy.y, abyssProjectileColor, 40, enemy.stateTimer);
   } else if (nextPattern === "ring") {
     enemy.state = "ring";
-    enemy.stateTimer = enemy.phase === 1 ? 0.66 : 0.52;
-    spawnChannelEffect(enemy.x, enemy.y, "rgba(145, 162, 255, {a})", 40, enemy.stateTimer);
+    enemy.stateTimer = enemy.phase === 1 ? 0.58 : 0.5;
+    spawnChannelEffect(enemy.x, enemy.y, abyssProjectileColor, 40, enemy.stateTimer);
   } else {
-    enemy.state = "summon";
-    enemy.stateTimer = enemy.phase === 1 ? 0.78 : 0.66;
-    spawnChannelEffect(enemy.x, enemy.y, "rgba(145, 162, 255, {a})", 46, enemy.stateTimer);
+    enemy.state = "zones";
+    enemy.stateTimer = enemy.phase === 1 ? 0.62 : 0.56;
+    spawnChannelEffect(enemy.x, enemy.y, abyssProjectileColor, 46, enemy.stateTimer);
   }
 }
 
 function updateMatriarchBoss(enemy, dt, moveMultiplier, player) {
+  enemy.summonAnchorTimer = Math.max(0, (enemy.summonAnchorTimer ?? 0) - dt);
   if (!enemy.phaseTriggered && enemy.hp <= enemy.maxHp * 0.6) {
     enemy.phaseTriggered = true;
     enemy.phase = 2;
     spawnBossPhaseEffect(enemy.x, enemy.y, "rgba(204, 122, 255, {a})");
   }
 
-  if (enemy.state === "spit") {
-    moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.28 * moveMultiplier, dt);
+  if (enemy.state === "venom-burst") {
+    moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.1 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
-      const count = enemy.phase === 1 ? 5 : 7;
+      const count = enemy.phase === 1 ? 4 : 6;
       for (let i = 0; i < count; i += 1) {
         const angle = (i / count) * Math.PI * 2 + randRange(-0.35, 0.35);
-        const distance = randRange(54, enemy.phase === 1 ? 220 : 270);
+        const distance = randRange(64, enemy.phase === 1 ? 180 : 220);
         spawnEnemyBurst(player.x + Math.cos(angle) * distance, player.y + Math.sin(angle) * distance, {
-          radius: 80,
-          telegraphTime: 0.68 + i * 0.05,
-          damage: enemy.phase === 1 ? 20 : 27,
+          radius: 74,
+          telegraphTime: 0.64 + i * 0.05,
+          damage: enemy.phase === 1 ? 16 : 21,
           color: "rgba(204, 122, 255, {a})",
         });
       }
       enemy.state = "recover";
       enemy.stateTimer = 0.36;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.15 : 1.48;
+      enemy.attackCooldown = enemy.phase === 1 ? 1.7 : 1.2;
     }
     return;
   }
 
-  if (enemy.state === "brood") {
-    moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.18 * moveMultiplier, dt);
+  if (enemy.state === "brood-call") {
+    enemy.summonAnchorX ??= enemy.x;
+    enemy.summonAnchorY ??= enemy.y;
+    enemy.x = enemy.summonAnchorX;
+    enemy.y = enemy.summonAnchorY;
+    enemy.knockbackVX = 0;
+    enemy.knockbackVY = 0;
+    enemy.pathTargetX = null;
+    enemy.pathTargetY = null;
+    enemy.pathTimer = 0;
     if (enemy.stateTimer <= 0) {
       spawnBossMinions(
         enemy,
         enemy.phase === 1
-          ? ["brood", "brood", "runner", "runner", "runner", "fang", "fang"]
-          : ["brood", "brood", "brood", "runner", "runner", "runner", "fang", "fang", "wraith"]
+          ? ["brood", "brood", "brood", "runner", "runner", "runner"]
+          : ["brood", "brood", "brood", "brood", "runner", "runner", "runner", "runner"],
+        {
+          minDistance: enemy.radius + 26,
+          maxDistance: enemy.radius + 86,
+          noSeparationTimer: 0.32,
+        }
       );
-      enemy.state = "recover";
-      enemy.stateTimer = 0.38;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.35 : 1.65;
-    }
-    return;
-  }
-
-  if (enemy.state === "pounce-windup") {
-    if (enemy.stateTimer <= 0) {
-      enemy.state = "pounce";
-      enemy.stateTimer = enemy.phase === 1 ? 0.38 : 0.5;
-    }
-    return;
-  }
-
-  if (enemy.state === "pounce") {
-    moveEnemyVector(enemy, enemy.memoryX, enemy.memoryY, enemy.speed * (enemy.phase === 1 ? 5.6 : 6.8) * moveMultiplier, dt);
-    if (enemy.stateTimer <= 0) {
+      enemy.x = enemy.summonAnchorX;
+      enemy.y = enemy.summonAnchorY;
+      enemy.noSeparationTimer = 0.32;
+      enemy.summonAnchorTimer = 0.24;
       spawnEnemyBurst(enemy.x, enemy.y, {
-        radius: enemy.phase === 1 ? 110 : 142,
-        telegraphTime: 0.32,
-        damage: enemy.phase === 1 ? 24 : 34,
+        radius: enemy.phase === 1 ? 102 : 126,
+        telegraphTime: enemy.phase === 1 ? 0.26 : 0.22,
+        damage: enemy.phase === 1 ? 17 : 23,
         color: "rgba(204, 122, 255, {a})",
       });
-      if (enemy.phase === 2) {
-        const sideOffset = 84;
-        const sideX = -enemy.memoryY;
-        const sideY = enemy.memoryX;
-        spawnBossMinions(enemy, ["brood", "runner", "runner"]);
-        spawnEnemyBurst(enemy.x + sideX * sideOffset, enemy.y + sideY * sideOffset, {
-          radius: 82,
-          telegraphTime: 0.38,
-          damage: 20,
-          color: "rgba(204, 122, 255, {a})",
-        });
-        spawnEnemyBurst(enemy.x - sideX * sideOffset, enemy.y - sideY * sideOffset, {
-          radius: 82,
-          telegraphTime: 0.38,
-          damage: 20,
+      enemy.state = "recover";
+      enemy.stateTimer = 0.38;
+      enemy.attackCooldown = enemy.phase === 1 ? 1.8 : 1.25;
+    }
+    return;
+  }
+
+  if (enemy.state === "egg-clutch") {
+    enemy.summonAnchorX ??= enemy.x;
+    enemy.summonAnchorY ??= enemy.y;
+    enemy.x = enemy.summonAnchorX;
+    enemy.y = enemy.summonAnchorY;
+    enemy.knockbackVX = 0;
+    enemy.knockbackVY = 0;
+    enemy.pathTargetX = null;
+    enemy.pathTargetY = null;
+    enemy.pathTimer = 0;
+    if (enemy.stateTimer <= 0) {
+      const clutchPoints = enemy.phase === 1 ? 3 : 5;
+      for (let i = 0; i < clutchPoints; i += 1) {
+        const angle = (i / clutchPoints) * Math.PI * 2 + randRange(-0.18, 0.18);
+        const distance = enemy.phase === 1 ? 120 : 155;
+        const hatchX = enemy.x + Math.cos(angle) * distance;
+        const hatchY = enemy.y + Math.sin(angle) * distance;
+        spawnEnemyBurst(hatchX, hatchY, {
+          radius: 64,
+          telegraphTime: 0.48 + i * 0.04,
+          damage: enemy.phase === 1 ? 14 : 18,
           color: "rgba(204, 122, 255, {a})",
         });
       }
+      spawnBossMinions(
+        enemy,
+        enemy.phase === 1 ? ["brood", "brood", "runner"] : ["brood", "brood", "brood", "runner", "runner"],
+        {
+          minDistance: enemy.radius + 32,
+          maxDistance: enemy.radius + 92,
+          noSeparationTimer: 0.32,
+        }
+      );
+      enemy.x = enemy.summonAnchorX;
+      enemy.y = enemy.summonAnchorY;
+      enemy.noSeparationTimer = 0.32;
+      enemy.summonAnchorTimer = 0.24;
       enemy.state = "recover";
       enemy.stateTimer = 0.38;
-      enemy.attackCooldown = enemy.phase === 1 ? 2 : 1.32;
+      enemy.attackCooldown = enemy.phase === 1 ? 1.75 : 1.2;
     }
     return;
   }
 
   if (enemy.state === "recover") {
-    moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.38 * moveMultiplier, dt);
+    if ((enemy.summonAnchorTimer ?? 0) > 0) {
+      enemy.x = enemy.summonAnchorX ?? enemy.x;
+      enemy.y = enemy.summonAnchorY ?? enemy.y;
+      enemy.knockbackVX = 0;
+      enemy.knockbackVY = 0;
+      enemy.pathTargetX = null;
+      enemy.pathTargetY = null;
+      enemy.pathTimer = 0;
+      if (enemy.stateTimer <= 0) {
+        enemy.state = "idle";
+      }
+      return;
+    }
+    enemy.summonAnchorX = null;
+    enemy.summonAnchorY = null;
+    moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.3 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
       enemy.state = "idle";
     }
     return;
   }
 
-  moveEnemyToward(enemy, player.x, player.y, enemy.speed * moveMultiplier, dt);
+  moveEnemyToward(enemy, player.x, player.y, enemy.speed * 0.52 * moveMultiplier, dt);
   if (enemy.attackCooldown > 0) {
     return;
   }
 
-  const pattern = enemy.phase === 1 ? ["spit", "pounce", "brood", "spit"] : ["spit", "brood", "pounce", "spit", "pounce"];
+  const pattern = enemy.phase === 1
+    ? ["brood-call", "venom-burst", "egg-clutch", "brood-call", "venom-burst"]
+    : ["brood-call", "egg-clutch", "brood-call", "venom-burst", "egg-clutch"];
   const nextIndex = (enemy.patternIndex + 1 + pattern.length) % pattern.length;
   const nextPattern = pattern[nextIndex];
   enemy.patternIndex = nextIndex;
 
-  if (nextPattern === "spit") {
-    enemy.state = "spit";
-    enemy.stateTimer = enemy.phase === 1 ? 0.7 : 0.56;
+  if (nextPattern === "venom-burst") {
+    enemy.summonAnchorX = null;
+    enemy.summonAnchorY = null;
+    enemy.state = "venom-burst";
+    enemy.stateTimer = enemy.phase === 1 ? 0.66 : 0.54;
     spawnChannelEffect(enemy.x, enemy.y, "rgba(204, 122, 255, {a})", 48, enemy.stateTimer);
-  } else if (nextPattern === "pounce") {
-    enemy.state = "pounce-windup";
-    enemy.stateTimer = enemy.phase === 1 ? 0.64 : 0.5;
-    const dx = player.x - enemy.x;
-    const dy = player.y - enemy.y;
-    const length = Math.hypot(dx, dy) || 1;
-    enemy.memoryX = dx / length;
-    enemy.memoryY = dy / length;
-    spawnLineEffect(enemy.x, enemy.y, player.x, player.y, enemy.stateTimer, "rgba(204, 122, 255, {a})", 13);
+  } else if (nextPattern === "egg-clutch") {
+    enemy.summonAnchorX = enemy.x;
+    enemy.summonAnchorY = enemy.y;
+    enemy.state = "egg-clutch";
+    enemy.stateTimer = enemy.phase === 1 ? 0.74 : 0.62;
+    spawnChannelEffect(enemy.x, enemy.y, "rgba(204, 122, 255, {a})", 54, enemy.stateTimer);
   } else {
-    enemy.state = "brood";
-    enemy.stateTimer = enemy.phase === 1 ? 0.84 : 0.68;
+    enemy.summonAnchorX = enemy.x;
+    enemy.summonAnchorY = enemy.y;
+    enemy.state = "brood-call";
+    enemy.stateTimer = enemy.phase === 1 ? 0.82 : 0.66;
     spawnChannelEffect(enemy.x, enemy.y, "rgba(204, 122, 255, {a})", 52, enemy.stateTimer);
   }
 }
 
 function blinkBossToBand(enemy, player, innerRadius, outerRadius) {
-  const angle = Math.random() * Math.PI * 2;
+  const moveLength = Math.hypot(player.lastMoveX, player.lastMoveY);
+  const baseAngle = moveLength > 0.15
+    ? Math.atan2(player.lastMoveY, player.lastMoveX) + Math.PI
+    : Math.atan2(enemy.y - player.y, enemy.x - player.x);
+  const angle = baseAngle + randRange(-0.32, 0.32);
   const distance = randRange(innerRadius, outerRadius);
   const targetX = clamp(player.x + Math.cos(angle) * distance, WORLD.left + enemy.radius, WORLD.right - enemy.radius);
   const targetY = clamp(player.y + Math.sin(angle) * distance, WORLD.top + enemy.radius, WORLD.bottom - enemy.radius);
@@ -3466,239 +3620,260 @@ function updateHarbingerBoss(enemy, dt, moveMultiplier, player) {
   }
 
   if (enemy.state === "lattice") {
-    holdEnemyBand(enemy, player, 380, 560, enemy.speed * 0.3 * moveMultiplier, dt);
+    holdEnemyBand(enemy, player, 300, 470, enemy.speed * 0.62 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
       const baseAngle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
       const angles = enemy.phase === 1
         ? [baseAngle, baseAngle + Math.PI / 2]
         : [baseAngle, baseAngle + Math.PI / 3, baseAngle + (Math.PI * 2) / 3];
       spawnBossLattice(player.x, player.y, enemy.phase === 1 ? 520 : 620, {
-        telegraphTime: enemy.phase === 1 ? 0.54 : 0.48,
-        activeTime: enemy.phase === 1 ? 0.34 : 0.42,
-        width: enemy.phase === 1 ? 34 : 44,
-        damage: enemy.phase === 1 ? 25 : 31,
+        telegraphTime: enemy.phase === 1 ? 0.46 : 0.4,
+        activeTime: enemy.phase === 1 ? 0.32 : 0.38,
+        width: enemy.phase === 1 ? 34 : 42,
+        damage: enemy.phase === 1 ? 24 : 30,
       }, angles);
       enemy.state = "recover";
-      enemy.stateTimer = 0.34;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.2 : 1.55;
+      enemy.stateTimer = 0.24;
+      enemy.attackCooldown = enemy.phase === 1 ? 1.7 : 1.18;
     }
     return;
   }
 
   if (enemy.state === "blink") {
-    holdEnemyBand(enemy, player, 420, 600, enemy.speed * 0.24 * moveMultiplier, dt);
+    holdEnemyBand(enemy, player, 320, 480, enemy.speed * 0.74 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
       blinkBossToBand(enemy, player, 300, 420);
       enemy.memoryBurstsLeft = enemy.phase === 1 ? 2 : 3;
-      enemy.state = "barrage";
-      enemy.stateTimer = 0.14;
+      enemy.memoryAimX = player.x;
+      enemy.memoryAimY = player.y;
+      enemy.state = "barrage-windup";
+      enemy.stateTimer = enemy.phase === 1 ? 0.24 : 0.2;
+      spawnLineEffect(enemy.x, enemy.y, enemy.memoryAimX, enemy.memoryAimY, enemy.stateTimer, HOSTILE_ARCANE_COLOR, enemy.phase === 1 ? 8 : 10);
+      spawnChannelEffect(enemy.x, enemy.y, HOSTILE_ARCANE_COLOR, 30, enemy.stateTimer);
       enemy.attackCooldown = 0;
     }
     return;
   }
 
+  if (enemy.state === "barrage-windup") {
+    holdEnemyBand(enemy, player, 300, 460, enemy.speed * 0.38 * moveMultiplier, dt);
+    if (enemy.stateTimer <= 0) {
+      enemy.state = "barrage";
+      enemy.stateTimer = 0.1;
+    }
+    return;
+  }
+
   if (enemy.state === "barrage") {
-    holdEnemyBand(enemy, player, 360, 520, enemy.speed * 0.18 * moveMultiplier, dt);
+    holdEnemyBand(enemy, player, 300, 460, enemy.speed * 0.46 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
       const burstIndex = (enemy.phase === 1 ? 2 : 3) - enemy.memoryBurstsLeft;
       spawnBossFan(
         enemy,
-        player,
-        enemy.phase === 1 ? 7 : 9,
-        (enemy.phase === 1 ? 0.56 : 0.74) + burstIndex * 0.06,
-        360,
-        enemy.phase === 1 ? 18 : 22,
+        { x: enemy.memoryAimX ?? player.x, y: enemy.memoryAimY ?? player.y },
+        enemy.phase === 1 ? 8 : 10,
+        (enemy.phase === 1 ? 0.62 : 0.8) + burstIndex * 0.08,
+        enemy.phase === 1 ? 390 : 430,
+        enemy.phase === 1 ? 19 : 24,
         HOSTILE_ARCANE_COLOR
       );
       enemy.memoryBurstsLeft -= 1;
       if (enemy.memoryBurstsLeft > 0) {
-        enemy.stateTimer = enemy.phase === 1 ? 0.26 : 0.22;
+        enemy.stateTimer = enemy.phase === 1 ? 0.18 : 0.16;
       } else {
         enemy.state = "recover";
-        enemy.stateTimer = 0.36;
-        enemy.attackCooldown = enemy.phase === 1 ? 2.05 : 1.45;
+        enemy.stateTimer = 0.22;
+        enemy.attackCooldown = enemy.phase === 1 ? 1.5 : 1.02;
       }
     }
     return;
   }
 
-  if (enemy.state === "edict") {
-    holdEnemyBand(enemy, player, 420, 620, enemy.speed * 0.22 * moveMultiplier, dt);
-    if (enemy.stateTimer <= 0) {
-      empowerNearbyEnemies(enemy, enemy.phase === 1 ? 300 : 360, enemy.phase === 1 ? 0.26 : 0.34, enemy.phase === 1 ? 4.2 : 5.2, true);
-      spawnBossMinions(
-        enemy,
-        enemy.phase === 1
-          ? ["banner", "wraith", "runner", "runner"]
-          : ["banner", "banner", "mortar", "wraith", "runner"]
-      );
-      enemy.state = "recover";
-      enemy.stateTimer = 0.4;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.45 : 1.7;
-    }
-    return;
-  }
-
   if (enemy.state === "ring") {
-    holdEnemyBand(enemy, player, 390, 560, enemy.speed * 0.36 * moveMultiplier, dt);
+    holdEnemyBand(enemy, player, 300, 460, enemy.speed * 0.56 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
-      spawnBossRadial(enemy, enemy.phase === 1 ? 16 : 24, enemy.phase === 1 ? 300 : 360, enemy.phase === 1 ? 17 : 22, HOSTILE_ARCANE_COLOR);
+      spawnBossRadial(enemy, enemy.phase === 1 ? 18 : 26, enemy.phase === 1 ? 320 : 390, enemy.phase === 1 ? 16 : 22, HOSTILE_ARCANE_COLOR);
       enemy.state = "recover";
-      enemy.stateTimer = 0.32;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.05 : 1.42;
+      enemy.stateTimer = 0.24;
+      enemy.attackCooldown = enemy.phase === 1 ? 1.62 : 1.08;
     }
     return;
   }
 
   if (enemy.state === "recover") {
-    holdEnemyBand(enemy, player, 400, 580, enemy.speed * 0.42 * moveMultiplier, dt);
+    holdEnemyBand(enemy, player, 320, 500, enemy.speed * 0.74 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
       enemy.state = "idle";
     }
     return;
   }
 
-  holdEnemyBand(enemy, player, 400, 580, enemy.speed * moveMultiplier, dt);
+  holdEnemyBand(enemy, player, 320, 500, enemy.speed * 1.16 * moveMultiplier, dt);
   if (enemy.attackCooldown > 0) {
     return;
   }
 
   const pattern = enemy.phase === 1
-    ? ["lattice", "blink", "edict", "ring", "blink"]
-    : ["blink", "lattice", "ring", "edict", "blink", "lattice"];
+    ? ["blink", "lattice", "ring", "blink"]
+    : ["blink", "lattice", "ring", "blink", "lattice"];
   const nextIndex = (enemy.patternIndex + 1 + pattern.length) % pattern.length;
   const nextPattern = pattern[nextIndex];
   enemy.patternIndex = nextIndex;
 
   if (nextPattern === "lattice") {
     enemy.state = "lattice";
-    enemy.stateTimer = enemy.phase === 1 ? 0.74 : 0.58;
+    enemy.stateTimer = enemy.phase === 1 ? 0.58 : 0.46;
     spawnChannelEffect(enemy.x, enemy.y, HOSTILE_ARCANE_COLOR, 46, enemy.stateTimer);
   } else if (nextPattern === "blink") {
     enemy.state = "blink";
-    enemy.stateTimer = enemy.phase === 1 ? 0.54 : 0.44;
+    enemy.stateTimer = enemy.phase === 1 ? 0.42 : 0.32;
     spawnChannelEffect(enemy.x, enemy.y, HOSTILE_ARCANE_COLOR, 36, enemy.stateTimer);
-  } else if (nextPattern === "edict") {
-    enemy.state = "edict";
-    enemy.stateTimer = enemy.phase === 1 ? 0.82 : 0.66;
-    spawnChannelEffect(enemy.x, enemy.y, HOSTILE_ARCANE_COLOR, 42, enemy.stateTimer);
   } else {
     enemy.state = "ring";
-    enemy.stateTimer = enemy.phase === 1 ? 0.7 : 0.56;
+    enemy.stateTimer = enemy.phase === 1 ? 0.54 : 0.42;
     spawnChannelEffect(enemy.x, enemy.y, HOSTILE_ARCANE_COLOR, 40, enemy.stateTimer);
   }
 }
 
 function updateRegentBoss(enemy, dt, moveMultiplier, player) {
+  const regentProjectileColor = "rgba(173, 116, 255, {a})";
   if (!enemy.phaseTriggered && enemy.hp <= enemy.maxHp * 0.56) {
     enemy.phaseTriggered = true;
     enemy.phase = 2;
     spawnBossPhaseEffect(enemy.x, enemy.y, "rgba(255, 194, 112, {a})");
   }
 
-  if (enemy.state === "starfall") {
-    holdEnemyBand(enemy, player, 430, 620, enemy.speed * 0.22 * moveMultiplier, dt);
-    if (enemy.stateTimer <= 0) {
-      spawnBossStarfall(player, enemy.phase === 1 ? 7 : 10, 70, enemy.phase === 1 ? 260 : 340, {
-        telegraphTime: enemy.phase === 1 ? 0.68 : 0.62,
-        stagger: 0.06,
-        radius: 34,
-        radiusStep: 5,
-        damage: enemy.phase === 1 ? 22 : 29,
-      });
+  if (enemy.state === "spiral") {
+    holdEnemyBand(enemy, player, 500, 720, enemy.speed * 0.14 * moveMultiplier, dt);
+    enemy.memoryShotTimer = (enemy.memoryShotTimer ?? 0) - dt;
+    while ((enemy.memoryShotsLeft ?? 0) > 0 && enemy.memoryShotTimer <= 0) {
+      const armCount = enemy.phase === 1 ? 5 : 7;
+      for (let i = 0; i < armCount; i += 1) {
+        const angle = (enemy.memoryAngle ?? 0) + (i / armCount) * Math.PI * 2;
+        state.enemyAttacks.push({
+          kind: "projectile",
+          x: enemy.x,
+          y: enemy.y,
+          vx: Math.cos(angle) * (enemy.phase === 1 ? 305 : 380),
+          vy: Math.sin(angle) * (enemy.phase === 1 ? 305 : 380),
+          radius: enemy.phase === 1 ? 7 : 7.5,
+          damage: enemy.phase === 1 ? 16 : 21,
+          color: regentProjectileColor,
+          life: 4.2,
+          dead: false,
+        });
+      }
+      enemy.memoryAngle = (enemy.memoryAngle ?? 0) + (enemy.phase === 1 ? 0.42 : 0.34);
+      enemy.memoryShotsLeft -= 1;
+      enemy.memoryShotTimer += enemy.phase === 1 ? 0.085 : 0.055;
+    }
+    if ((enemy.memoryShotsLeft ?? 0) <= 0 || enemy.stateTimer <= 0) {
       enemy.state = "recover";
-      enemy.stateTimer = 0.36;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.35 : 1.62;
+      enemy.stateTimer = 0.32;
+      enemy.attackCooldown = enemy.phase === 1 ? 1.6 : 1.28;
     }
     return;
   }
 
   if (enemy.state === "orbital") {
-    holdEnemyBand(enemy, player, 440, 650, enemy.speed * 0.2 * moveMultiplier, dt);
+    holdEnemyBand(enemy, player, 520, 730, enemy.speed * 0.16 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
-      const count = enemy.phase === 1 ? 7 : 9;
+      const count = enemy.phase === 1 ? 20 : 28;
       for (let i = 0; i < count; i += 1) {
-        const angle = (i / count) * Math.PI * 2 + state.elapsed * 0.45;
-        const distance = enemy.phase === 1 ? 170 : 205;
+        const angle = (i / count) * Math.PI * 2 + state.elapsed * 0.42;
+        const distance = enemy.phase === 1 ? 190 : 230;
         spawnEnemyBurst(player.x + Math.cos(angle) * distance, player.y + Math.sin(angle) * distance, {
-          radius: 76,
-          telegraphTime: 0.7 + (i % 2) * 0.08,
-          damage: enemy.phase === 1 ? 20 : 26,
+          radius: enemy.phase === 1 ? 72 : 76,
+          telegraphTime: 0.66 + (i % 2) * 0.07,
+          damage: enemy.phase === 1 ? 17 : 23,
+          color: regentProjectileColor,
         });
       }
       enemy.state = "recover";
       enemy.stateTimer = 0.34;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.05 : 1.44;
+      enemy.attackCooldown = enemy.phase === 1 ? 1.65 : 1.32;
     }
     return;
   }
 
   if (enemy.state === "crown") {
-    holdEnemyBand(enemy, player, 420, 620, enemy.speed * 0.3 * moveMultiplier, dt);
+    holdEnemyBand(enemy, player, 500, 720, enemy.speed * 0.18 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
-      const outerCount = enemy.phase === 1 ? 5 : 6;
-      const innerCount = enemy.phase === 1 ? 3 : 4;
-      const baseAngle = state.elapsed * 0.8;
+      const outerCount = enemy.phase === 1 ? 34 : 46;
+      const innerCount = enemy.phase === 1 ? 20 : 28;
+      const baseAngle = state.elapsed * 0.65;
       for (let i = 0; i < outerCount; i += 1) {
         const angle = baseAngle + (i / outerCount) * Math.PI * 2;
-        spawnEnemyBurst(player.x + Math.cos(angle) * 250, player.y + Math.sin(angle) * 250, {
-          radius: 82,
-          telegraphTime: 0.72 + (i % 2) * 0.08,
-          damage: enemy.phase === 1 ? 22 : 28,
-          color: "rgba(255, 194, 112, {a})",
+        state.enemyAttacks.push({
+          kind: "projectile",
+          x: enemy.x,
+          y: enemy.y,
+          vx: Math.cos(angle) * (enemy.phase === 1 ? 285 : 350),
+          vy: Math.sin(angle) * (enemy.phase === 1 ? 285 : 350),
+          radius: 7.5,
+          damage: enemy.phase === 1 ? 16 : 20,
+          color: regentProjectileColor,
+          life: 4.6,
+          dead: false,
         });
       }
       for (let i = 0; i < innerCount; i += 1) {
-        const angle = -baseAngle + (i / innerCount) * Math.PI * 2;
-        spawnEnemyBurst(player.x + Math.cos(angle) * 132, player.y + Math.sin(angle) * 132, {
-          radius: 68,
-          telegraphTime: 0.84 + (i % 2) * 0.06,
-          damage: enemy.phase === 1 ? 18 : 24,
-          color: "rgba(255, 214, 132, {a})",
+        const angle = -baseAngle + (i / innerCount) * Math.PI * 2 + Math.PI / innerCount;
+        state.enemyAttacks.push({
+          kind: "projectile",
+          x: enemy.x,
+          y: enemy.y,
+          vx: Math.cos(angle) * (enemy.phase === 1 ? 390 : 490),
+          vy: Math.sin(angle) * (enemy.phase === 1 ? 390 : 490),
+          radius: 6.8,
+          damage: enemy.phase === 1 ? 14 : 18,
+          color: regentProjectileColor,
+          life: 4.2,
+          dead: false,
         });
-      }
-      if (enemy.phase === 2) {
-        spawnBossMinions(enemy, ["mortar", "banner"]);
       }
       enemy.state = "recover";
       enemy.stateTimer = 0.38;
-      enemy.attackCooldown = enemy.phase === 1 ? 2.55 : 1.78;
+      enemy.attackCooldown = enemy.phase === 1 ? 1.72 : 1.42;
     }
     return;
   }
 
   if (enemy.state === "recover") {
-    holdEnemyBand(enemy, player, 430, 620, enemy.speed * 0.38 * moveMultiplier, dt);
+    holdEnemyBand(enemy, player, 520, 730, enemy.speed * 0.2 * moveMultiplier, dt);
     if (enemy.stateTimer <= 0) {
       enemy.state = "idle";
     }
     return;
   }
 
-  holdEnemyBand(enemy, player, 430, 620, enemy.speed * moveMultiplier, dt);
+  holdEnemyBand(enemy, player, 520, 730, enemy.speed * 0.28 * moveMultiplier, dt);
   if (enemy.attackCooldown > 0) {
     return;
   }
 
   const pattern = enemy.phase === 1
-    ? ["starfall", "orbital", "crown", "starfall"]
-    : ["orbital", "starfall", "crown", "orbital", "starfall"];
+    ? ["spiral", "orbital", "crown", "spiral"]
+    : ["orbital", "spiral", "crown", "spiral", "orbital"];
   const nextIndex = (enemy.patternIndex + 1 + pattern.length) % pattern.length;
   const nextPattern = pattern[nextIndex];
   enemy.patternIndex = nextIndex;
 
-  if (nextPattern === "starfall") {
-    enemy.state = "starfall";
-    enemy.stateTimer = enemy.phase === 1 ? 0.76 : 0.62;
+  if (nextPattern === "spiral") {
+    enemy.state = "spiral";
+    enemy.stateTimer = enemy.phase === 1 ? 1.22 : 1.3;
+    enemy.memoryShotsLeft = enemy.phase === 1 ? 30 : 44;
+    enemy.memoryShotTimer = 0.04;
+    enemy.memoryAngle = state.elapsed * 0.85;
     spawnChannelEffect(enemy.x, enemy.y, HOSTILE_ARCANE_COLOR, 48, enemy.stateTimer);
   } else if (nextPattern === "orbital") {
     enemy.state = "orbital";
-    enemy.stateTimer = enemy.phase === 1 ? 0.7 : 0.58;
+    enemy.stateTimer = enemy.phase === 1 ? 0.66 : 0.54;
     spawnChannelEffect(enemy.x, enemy.y, HOSTILE_ARCANE_COLOR, 44, enemy.stateTimer);
   } else {
     enemy.state = "crown";
-    enemy.stateTimer = enemy.phase === 1 ? 0.74 : 0.62;
-    spawnChannelEffect(enemy.x, enemy.y, "rgba(255, 194, 112, {a})", 50, enemy.stateTimer);
+    enemy.stateTimer = enemy.phase === 1 ? 0.72 : 0.58;
+    spawnChannelEffect(enemy.x, enemy.y, regentProjectileColor, 50, enemy.stateTimer);
   }
 }
 
@@ -3924,6 +4099,9 @@ function resolveSeparationAcrossBuckets(groupA, groupB, intensity) {
 }
 
 function separateEnemyPair(a, b, intensity) {
+  if ((a.noSeparationTimer ?? 0) > 0 || (b.noSeparationTimer ?? 0) > 0) {
+    return;
+  }
   let dx = b.x - a.x;
   let dy = b.y - a.y;
   let distanceSq = dx * dx + dy * dy;
@@ -4344,7 +4522,7 @@ function resolvePlayerEnemyDamage(dt, grid) {
       }
 
       for (const enemy of cell.enemies) {
-        if (enemy.dead) {
+        if (enemy.dead || enemy.airborne) {
           continue;
         }
 

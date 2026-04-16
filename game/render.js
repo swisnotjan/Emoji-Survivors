@@ -1973,6 +1973,10 @@ function drawEnemies() {
     if (!isVisible(pos.x, pos.y, 58)) {
       continue;
     }
+    const visualHeight = enemy.visualHeight ?? 0;
+    const drawX = pos.x;
+    const drawY = pos.y - visualHeight;
+    const jumpScale = visualHeight > 0 ? 1 + Math.min(0.18, visualHeight / 900) : 1;
 
     const font = ENEMY_ARCHETYPES[enemy.type].font;
     if (font !== activeFont) {
@@ -1980,13 +1984,23 @@ function drawEnemies() {
       activeFont = font;
     }
 
+    if (visualHeight > 0) {
+      const squash = 1 + Math.min(0.3, visualHeight / 240);
+      ctx.save();
+      ctx.fillStyle = "rgba(9, 13, 11, 0.26)";
+      ctx.beginPath();
+      ctx.ellipse(pos.x, pos.y + enemy.radius * 0.48, enemy.radius * (0.8 + squash * 0.2), enemy.radius * 0.34, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
     if (perfTier === 0 && enemy.isBoss && enemy.phase >= 2) {
       const rageColor = BOSS_THEME_COLORS[enemy.type] ?? "rgba(255, 160, 120, {a})";
       const ragePulse = 0.62 + Math.sin(state.elapsed * 5.6 + enemy.id) * 0.14;
       ctx.save();
       fillGradientRing(
-        pos.x,
-        pos.y,
+        drawX,
+        drawY,
         enemy.radius + 10,
         enemy.radius + 24 + ragePulse * 10,
         [
@@ -2007,7 +2021,7 @@ function drawEnemies() {
       ctx.save();
       ctx.fillStyle = tintAlpha(status.aura, 0.12 + auraStrength * 0.18);
       ctx.beginPath();
-      ctx.arc(pos.x, pos.y, enemy.radius + 8 + auraStrength * 4, 0, Math.PI * 2);
+      ctx.arc(drawX, drawY, enemy.radius + 8 + auraStrength * 4, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
 
@@ -2016,7 +2030,13 @@ function drawEnemies() {
       ctx.filter = `saturate(1.18) hue-rotate(${hueRotate}deg) brightness(${1.04 + auraStrength * 0.08})`;
       ctx.shadowBlur = 18;
       ctx.shadowColor = tintAlpha(status.aura, 0.2 + auraStrength * 0.35);
-      ctx.fillText(enemy.emoji, pos.x, pos.y + 1);
+      if (jumpScale !== 1) {
+        ctx.translate(drawX, drawY + 1);
+        ctx.scale(jumpScale, jumpScale);
+        ctx.fillText(enemy.emoji, 0, 0);
+      } else {
+        ctx.fillText(enemy.emoji, drawX, drawY + 1);
+      }
       ctx.restore();
     } else {
       if (enemy.isBoss && enemy.phase >= 2 && perfTier < 2) {
@@ -2024,10 +2044,24 @@ function drawEnemies() {
         ctx.filter = "saturate(1.18) brightness(1.1)";
         ctx.shadowBlur = 20;
         ctx.shadowColor = tintAlpha(BOSS_THEME_COLORS[enemy.type] ?? "rgba(255, 160, 120, {a})", 0.34);
-        ctx.fillText(enemy.emoji, pos.x, pos.y + 1);
+        if (jumpScale !== 1) {
+          ctx.translate(drawX, drawY + 1);
+          ctx.scale(jumpScale, jumpScale);
+          ctx.fillText(enemy.emoji, 0, 0);
+        } else {
+          ctx.fillText(enemy.emoji, drawX, drawY + 1);
+        }
         ctx.restore();
       } else {
-        ctx.fillText(enemy.emoji, pos.x, pos.y + 1);
+        if (jumpScale !== 1) {
+          ctx.save();
+          ctx.translate(drawX, drawY + 1);
+          ctx.scale(jumpScale, jumpScale);
+          ctx.fillText(enemy.emoji, 0, 0);
+          ctx.restore();
+        } else {
+          ctx.fillText(enemy.emoji, drawX, drawY + 1);
+        }
       }
     }
 
@@ -2037,7 +2071,7 @@ function drawEnemies() {
       ctx.strokeStyle = tintAlpha("rgba(168, 116, 255, {a})", 0.18 + hasteStrength * 0.28);
       ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.arc(pos.x, pos.y, enemy.radius + 11, state.elapsed * 2.2, state.elapsed * 2.2 + Math.PI * 1.35);
+      ctx.arc(drawX, drawY, enemy.radius + 11, state.elapsed * 2.2, state.elapsed * 2.2 + Math.PI * 1.35);
       ctx.stroke();
       ctx.restore();
     }
@@ -2048,8 +2082,8 @@ function drawEnemies() {
 
     const hpRatio = clamp(enemy.hp / enemy.maxHp, 0, 1);
     const barWidth = enemy.radius * 2.2;
-    const barX = pos.x - barWidth / 2;
-    const barY = pos.y - enemy.radius - 12;
+    const barX = drawX - barWidth / 2;
+    const barY = drawY - enemy.radius - 12;
 
     ctx.fillStyle = "rgba(5, 11, 9, 0.62)";
     ctx.fillRect(barX, barY, barWidth, 4);
@@ -4318,7 +4352,7 @@ function spawnBossFan(enemy, player, count, spread, speed, damage, color) {
       vy: Math.sin(angle) * speed,
       radius: 8,
       damage,
-      color: ENEMY_PROJECTILE_COLOR,
+      color: color ?? ENEMY_PROJECTILE_COLOR,
       life: 3.5,
       dead: false,
     });
@@ -4336,7 +4370,7 @@ function spawnBossRadial(enemy, count, speed, damage, color) {
       vy: Math.sin(angle) * speed,
       radius: 8,
       damage,
-      color: ENEMY_PROJECTILE_COLOR,
+      color: color ?? ENEMY_PROJECTILE_COLOR,
       life: 3.8,
       dead: false,
     });
@@ -4362,12 +4396,23 @@ function spawnBeamAttack(x1, y1, x2, y2, spec) {
   });
 }
 
-function spawnBossMinions(enemy, roster) {
+function spawnBossMinions(enemy, roster, options = {}) {
   for (let i = 0; i < roster.length; i += 1) {
     if (state.enemies.length >= state.spawnDirector.maxEnemiesOnField) {
       return;
     }
-    state.enemies.push(createEnemy(roster[i], { x: enemy.x, y: enemy.y }, i, roster.length));
+    const minion = createEnemy(
+      roster[i],
+      { x: enemy.x, y: enemy.y },
+      i,
+      roster.length,
+      {
+        spawnDistanceMin: options.minDistance ?? 16,
+        spawnDistanceMax: options.maxDistance ?? 56,
+      }
+    );
+    minion.noSeparationTimer = Math.max(minion.noSeparationTimer ?? 0, options.noSeparationTimer ?? 0);
+    state.enemies.push(minion);
   }
 }
 
