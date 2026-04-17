@@ -6685,7 +6685,3 @@ function renderUpgradesCodex() {
     }
   }
 }
-
-    if (enemy.freezeResistTimer <= 0) {
-      enemy.freezeResist = Math.max(0, enemy.freezeResist - dt * 0.24);
-    }
