@@ -93,14 +93,14 @@ function createInitialState(classId = "wind") {
       windRushTimer: 0,
       windRushBonus: classId === "wind" ? 0.18 : 0,
       bloodRiteTimer: 0,
-      lifesteal: classId === "blood" ? 0.11 : 0,
+      lifesteal: classId === "blood" ? 0.08 : 0,
       bloodGuardTimer: 0,
       bloodStandReduction: classId === "blood" ? 0.08 : 0,
-      bloodPoolReduction: classId === "blood" ? 0.14 : 0,
-      bloodRiteReduction: classId === "blood" ? 0.22 : 0,
+      bloodPoolReduction: classId === "blood" ? 0.1 : 0,
+      bloodRiteReduction: classId === "blood" ? 0.16 : 0,
       bloodMarkedReduction: classId === "blood" ? 0.03 : 0,
-      bloodCloseRangeBonus: classId === "blood" ? 0.08 : 0,
-      bloodRiteLifestealBonus: classId === "blood" ? 0.1 : 0,
+      bloodCloseRangeBonus: classId === "blood" ? 0.05 : 0,
+      bloodRiteLifestealBonus: classId === "blood" ? 0.06 : 0,
       frostCritChance: classId === "frost" ? 0.02 : 0,
       frostCritMultiplier: classId === "frost" ? 1.85 : 1.5,
       frostChilledCritBonus: classId === "frost" ? 0.14 : 0,
@@ -205,6 +205,7 @@ function createInitialState(classId = "wind") {
       focus: false,
       upgradesPanel: false,
       devMenu: false,
+      codexTab: "build",
     },
     dev: {
       activeTab: "skills",
@@ -248,7 +249,9 @@ function createInitialState(classId = "wind") {
     metaRun: {
       xpCollected: 0,
       unlockedClassThisRun: null,
+      activeDuration: 0,
     },
+    archiveRun: createArchiveRunState(),
     telemetry: createRunTelemetry(classId),
     queryCache: {
       tick: -1,
@@ -261,6 +264,36 @@ function createInitialState(classId = "wind") {
       tier: 0,
       renderScaleTarget: 1,
     },
+  };
+}
+
+function createArchiveRunState() {
+  return {
+    completedChallenges: [],
+    completedAchievements: [],
+    revealEntries: [],
+    toastQueue: [],
+    toastCurrent: null,
+    bossesDefeated: {},
+    bossCount: 0,
+    skillUnlocks: 0,
+    masteryChoices: 0,
+    majorChoices: 0,
+    blessingChoices: 0,
+    totalHealing: 0,
+    timeLowHp: 0,
+    burnKillCount: 0,
+    burnKillStreak: 0,
+    burnKillStreakTimer: 0,
+    maxBurnKillStreak: 0,
+    afflictedKills: 0,
+    thrallsSpawned: 0,
+    maxThralls: 0,
+    currentBossType: null,
+    bossEncounterContactDamage: 0,
+    windTouchlessBossDefeat: false,
+    windChargedBossDefeat: false,
+    frostBossShatter: false,
   };
 }
 
@@ -307,6 +340,385 @@ function getUnlockedSkillStates() {
 
 function getSkillState(slot) {
   return state.player.skills.find((skill) => skill.slot === slot) ?? null;
+}
+
+function buildArchiveUnlockEntry(kind, id) {
+  const def = kind === "achievement" ? ARCHIVE_ACHIEVEMENT_MAP.get(id) : ARCHIVE_CHALLENGE_MAP.get(id);
+  if (!def) {
+    return null;
+  }
+  return {
+    kind,
+    id,
+    icon: def.icon,
+    title: def.title,
+    description: def.description,
+    category: def.category ?? "achievement",
+  };
+}
+
+function queueArchiveUnlock(kind, id, showToast = true) {
+  const entry = buildArchiveUnlockEntry(kind, id);
+  if (!entry) {
+    return;
+  }
+  state.archiveRun.revealEntries.push(entry);
+  if (showToast) {
+    state.archiveRun.toastQueue.push(entry);
+    renderArchiveToast();
+  }
+}
+
+function markArchiveChallengeCompleted(id, showToast = true) {
+  if (hasCompletedArchiveChallenge(id)) {
+    return false;
+  }
+  metaProgress.archive.challenges[id] = new Date().toISOString();
+  saveMetaProgress();
+  state.archiveRun.completedChallenges.push(id);
+  queueArchiveUnlock("challenge", id, showToast);
+  return true;
+}
+
+function markArchiveAchievementCompleted(id, showToast = true) {
+  if (hasCompletedArchiveAchievement(id)) {
+    return false;
+  }
+  metaProgress.archive.achievements[id] = new Date().toISOString();
+  saveMetaProgress();
+  state.archiveRun.completedAchievements.push(id);
+  queueArchiveUnlock("achievement", id, showToast);
+  return true;
+}
+
+function getArchiveChallengeCurrentValue(id) {
+  const run = state.archiveRun;
+  switch (id) {
+    case "journey-survive-5":
+      return state.metaRun.activeDuration;
+    case "journey-level-10":
+      return state.progression.level;
+    case "journey-full-kit":
+      return run.skillUnlocks;
+    case "journey-mastery":
+      return run.masteryChoices;
+    case "journey-boss-rush":
+      return run.bossCount;
+    case "boss-countess":
+      return Number(Boolean(run.bossesDefeated.countess || state.bossDefeats.countess));
+    case "boss-colossus":
+      return Number(Boolean(run.bossesDefeated.colossus || state.bossDefeats.colossus));
+    case "boss-abyss":
+      return Number(Boolean(run.bossesDefeated.abyss || state.bossDefeats.abyss));
+    case "boss-matriarch":
+      return Number(Boolean(run.bossesDefeated.matriarch || state.bossDefeats.matriarch));
+    case "boss-harbinger":
+      return Number(Boolean(run.bossesDefeated.harbinger || state.bossDefeats.harbinger));
+    case "boss-regent":
+      return Number(Boolean(run.bossesDefeated.regent || state.bossDefeats.regent));
+    case "wind-reservoir":
+      return state.player.dash.maxCharges;
+    case "frost-afflicted":
+      return run.afflictedKills;
+    case "fire-streak":
+      return run.maxBurnKillStreak;
+    case "fire-burn-kills":
+      return run.burnKillCount;
+    case "necro-thralls":
+      return run.maxThralls;
+    case "necro-summoner":
+      return run.thrallsSpawned;
+    case "blood-low-hp":
+      return run.timeLowHp;
+    case "blood-healing":
+      return run.totalHealing;
+    default:
+      return 0;
+  }
+}
+
+function isArchiveChallengeComplete(def) {
+  const run = state.archiveRun;
+  switch (def.id) {
+    case "journey-survive-5":
+      return state.metaRun.activeDuration >= def.target;
+    case "journey-level-10":
+      return state.progression.level >= def.target;
+    case "journey-full-kit":
+      return getUnlockedSkillStates().length >= def.target || run.skillUnlocks >= def.target;
+    case "journey-mastery":
+      return run.masteryChoices >= def.target;
+    case "journey-trinity":
+      return run.majorChoices >= 1 && run.masteryChoices >= 1 && run.blessingChoices >= 1;
+    case "journey-boss-rush":
+      return run.bossCount >= def.target;
+    case "boss-countess":
+    case "boss-colossus":
+    case "boss-abyss":
+    case "boss-matriarch":
+    case "boss-harbinger":
+    case "boss-regent":
+      return Boolean(run.bossesDefeated[def.bossType] || state.bossDefeats[def.bossType]);
+    case "wind-touchless":
+      return state.player.classId === "wind" && run.windTouchlessBossDefeat;
+    case "wind-reservoir":
+      return state.player.classId === "wind" && run.windChargedBossDefeat;
+    case "frost-afflicted":
+      return state.player.classId === "frost" && run.afflictedKills >= def.target;
+    case "frost-shatter":
+      return state.player.classId === "frost" && Boolean(run.frostBossShatter);
+    case "fire-streak":
+      return state.player.classId === "fire" && run.maxBurnKillStreak >= def.target;
+    case "fire-burn-kills":
+      return state.player.classId === "fire" && run.burnKillCount >= def.target;
+    case "necro-thralls":
+      return state.player.classId === "necro" && run.maxThralls >= def.target;
+    case "necro-summoner":
+      return state.player.classId === "necro" && run.thrallsSpawned >= def.target;
+    case "blood-low-hp":
+      return state.player.classId === "blood" && run.timeLowHp >= def.target;
+    case "blood-healing":
+      return state.player.classId === "blood" && run.totalHealing >= def.target;
+    default:
+      return false;
+  }
+}
+
+function getArchiveAchievementCurrentValue(def) {
+  if (def.kind === "count") {
+    return getCompletedArchiveChallengeCount();
+  }
+  if (def.kind === "category") {
+    const items = getArchiveChallengesByCategory(def.category);
+    return items.filter((entry) => hasCompletedArchiveChallenge(entry.id)).length;
+  }
+  if (def.kind === "all") {
+    return getCompletedArchiveChallengeCount();
+  }
+  return 0;
+}
+
+function isArchiveAchievementComplete(def) {
+  if (def.kind === "count") {
+    return getCompletedArchiveChallengeCount() >= def.target;
+  }
+  if (def.kind === "category") {
+    const items = getArchiveChallengesByCategory(def.category);
+    return items.length > 0 && items.every((entry) => hasCompletedArchiveChallenge(entry.id));
+  }
+  if (def.kind === "all") {
+    return ARCHIVE_CHALLENGES.length > 0 && getCompletedArchiveChallengeCount() >= ARCHIVE_CHALLENGES.length;
+  }
+  return false;
+}
+
+function evaluateArchiveUnlocks(showToast = true) {
+  let unlockedSomething = false;
+  for (const challenge of ARCHIVE_CHALLENGES) {
+    if (hasCompletedArchiveChallenge(challenge.id)) {
+      continue;
+    }
+    if (isArchiveChallengeComplete(challenge)) {
+      if (markArchiveChallengeCompleted(challenge.id, showToast)) {
+        unlockedSomething = true;
+      }
+    }
+  }
+  for (const achievement of ARCHIVE_ACHIEVEMENTS) {
+    if (hasCompletedArchiveAchievement(achievement.id)) {
+      continue;
+    }
+    if (isArchiveAchievementComplete(achievement)) {
+      if (markArchiveAchievementCompleted(achievement.id, showToast)) {
+        unlockedSomething = true;
+      }
+    }
+  }
+  return unlockedSomething;
+}
+
+function trackArchiveEvent(eventType, payload = {}) {
+  const run = state.archiveRun;
+  switch (eventType) {
+    case "damage_taken":
+      if (payload.sourceKey === "contact" && run.currentBossType) {
+        run.bossEncounterContactDamage += payload.amount;
+      }
+      break;
+    case "boss_spawned":
+      run.currentBossType = payload.bossType ?? null;
+      run.bossEncounterContactDamage = 0;
+      break;
+    case "boss_defeated":
+      run.bossCount += 1;
+      run.currentBossType = null;
+      run.bossesDefeated[payload.bossType] = true;
+      if (state.player.classId === "wind" && run.bossEncounterContactDamage <= 0.1) {
+        run.windTouchlessBossDefeat = true;
+      }
+      if (state.player.classId === "wind" && state.player.dash.maxCharges >= 3) {
+        run.windChargedBossDefeat = true;
+      }
+      if (state.player.classId === "frost" && (payload.enemy?.freezeTimer > 0 || payload.enemy?.brittleTimer > 0)) {
+        run.frostBossShatter = true;
+      }
+      break;
+    case "skill_unlocked":
+      run.skillUnlocks += 1;
+      break;
+    case "major_picked":
+      run.majorChoices += 1;
+      break;
+    case "mastery_picked":
+      run.masteryChoices += 1;
+      break;
+    case "boss_blessing_picked":
+      run.blessingChoices += 1;
+      break;
+    case "enemy_defeated":
+      if (payload.enemy?.burnStacks > 0) {
+        run.burnKillCount += 1;
+        run.burnKillStreak += 1;
+        run.burnKillStreakTimer = 3.2;
+        run.maxBurnKillStreak = Math.max(run.maxBurnKillStreak, run.burnKillStreak);
+      }
+      if (
+        payload.enemy?.freezeTimer > 0 ||
+        payload.enemy?.brittleTimer > 0 ||
+        payload.enemy?.chillStacks > 0 ||
+        payload.enemy?.slowTimer > 0
+      ) {
+        run.afflictedKills += 1;
+      }
+      break;
+    case "thrall_spawned":
+      run.thrallsSpawned += 1;
+      break;
+    case "healed":
+      run.totalHealing += payload.amount;
+      break;
+    default:
+      break;
+  }
+  evaluateArchiveUnlocks(true);
+}
+
+function updateArchiveRunProgress(dt) {
+  const run = state.archiveRun;
+  if (state.player.classId === "blood" && state.player.maxHp > 0 && state.player.hp / state.player.maxHp <= 0.35) {
+    run.timeLowHp += dt;
+  }
+  run.maxThralls = Math.max(run.maxThralls, countActiveThralls());
+  if (run.burnKillStreakTimer > 0) {
+    run.burnKillStreakTimer = Math.max(0, run.burnKillStreakTimer - dt);
+    if (run.burnKillStreakTimer <= 0) {
+      run.burnKillStreak = 0;
+    }
+  }
+}
+
+function updateArchiveToast(dt) {
+  const run = state.archiveRun;
+  if (!run.toastCurrent && run.toastQueue.length > 0) {
+    run.toastCurrent = {
+      ...run.toastQueue.shift(),
+      age: 0,
+    };
+    renderArchiveToast();
+  }
+  if (!run.toastCurrent) {
+    return;
+  }
+  run.toastCurrent.age += dt;
+  if (run.toastCurrent.age >= 4.8) {
+    run.toastCurrent = null;
+    renderArchiveToast();
+    if (run.toastQueue.length > 0) {
+      updateArchiveToast(0);
+    }
+  } else if (run.toastCurrent.age <= 0.5 || run.toastCurrent.age >= 4) {
+    renderArchiveToast();
+  }
+}
+
+function getArchiveToastPhase(entry) {
+  if (!entry) {
+    return "hidden";
+  }
+  if (entry.age < 0.42) {
+    return "enter";
+  }
+  if (entry.age > 3.92) {
+    return "exit";
+  }
+  return "steady";
+}
+
+function renderArchiveToast() {
+  if (!archiveToastLayer) {
+    return;
+  }
+  const entry = state.archiveRun.toastCurrent;
+  if (!entry) {
+    archiveToastLayer.innerHTML = "";
+    archiveToastLayer.classList.add("hidden");
+    return;
+  }
+  const phase = getArchiveToastPhase(entry);
+  const kicker = entry.kind === "achievement" ? "Achievement Unlocked" : "Challenge Complete";
+  archiveToastLayer.classList.remove("hidden");
+  archiveToastLayer.innerHTML = [
+    `<div class="archive-toast is-${phase}" data-kind="${entry.kind}">`,
+    `<div class="archive-toast-glow"></div>`,
+    `<div class="archive-toast-rays"></div>`,
+    `<div class="archive-toast-shimmer"></div>`,
+    `<div class="archive-toast-icon">${entry.icon}</div>`,
+    `<div class="archive-toast-copy">`,
+    `<span class="archive-toast-kicker">${kicker}</span>`,
+    `<strong>${entry.title}</strong>`,
+    `<p>${entry.description}</p>`,
+    `</div>`,
+    `</div>`,
+  ].join("");
+}
+
+function formatArchiveMetric(value, challenge) {
+  if (challenge?.id === "journey-survive-5" || challenge?.id === "blood-low-hp") {
+    return `${Math.floor(value)}s`;
+  }
+  return `${Math.floor(value)}`;
+}
+
+function getArchiveChallengeStatus(challenge) {
+  if (hasCompletedArchiveChallenge(challenge.id)) {
+    return "Completed";
+  }
+  if (challenge.id === "journey-trinity") {
+    return `${state.archiveRun.majorChoices}/1 Major - ${state.archiveRun.masteryChoices}/1 Mastery - ${state.archiveRun.blessingChoices}/1 Blessing`;
+  }
+  if (challenge.id === "wind-touchless" || challenge.id === "frost-shatter") {
+    return challenge.description;
+  }
+  const current = getArchiveChallengeCurrentValue(challenge.id);
+  if (challenge.target) {
+    return `${formatArchiveMetric(current, challenge)} / ${formatArchiveMetric(challenge.target, challenge)}`;
+  }
+  return challenge.description;
+}
+
+function getArchiveAchievementStatus(achievement) {
+  if (hasCompletedArchiveAchievement(achievement.id)) {
+    return "Unlocked";
+  }
+  const current = getArchiveAchievementCurrentValue(achievement);
+  if (achievement.kind === "category") {
+    const total = getArchiveChallengesByCategory(achievement.category).length;
+    return `${current} / ${total}`;
+  }
+  if (achievement.target) {
+    return `${current} / ${achievement.target}`;
+  }
+  return `${current} / ${ARCHIVE_CHALLENGES.length}`;
 }
 
 function hasAffliction(enemy) {
@@ -401,7 +813,7 @@ function bindEvents() {
       if (!startOverlay.classList.contains("hidden")) {
         startRun();
       } else {
-        restartRun();
+        restartRunWithArchiveOutro();
       }
     }
   });
@@ -435,13 +847,14 @@ function bindEvents() {
   });
 
   window.addEventListener("resize", resizeCanvas);
-  restartButton.addEventListener("click", restartRun);
+  restartButton.addEventListener("click", restartRunWithArchiveOutro);
   pauseRestartButton.addEventListener("click", () => endRun({ instant: true, cause: "ended" }));
   upgradeOptions.addEventListener("click", onUpgradeOptionClick);
   bossRewardOptions.addEventListener("click", onBossRewardOptionClick);
   upgradesButton.addEventListener("click", toggleUpgradesPanel);
   closeUpgradesButton.addEventListener("click", closeUpgradesPanel);
   upgradesList.addEventListener("click", onUpgradeRowClick);
+  codexTabNav?.addEventListener("click", onCodexTabClick);
   pauseOverlay.addEventListener("click", (event) => {
     if (event.target !== pauseOverlay || !isPauseActive()) {
       return;
@@ -890,6 +1303,7 @@ function scaleFxCount(count) {
 
 function update(dt) {
   updateHudBarAnimations(dt);
+  updateArchiveToast(dt);
 
   if (state.runEnd.active) {
     updateRunEndSequence(dt);
@@ -904,6 +1318,7 @@ function update(dt) {
 
   state.tick += 1;
   state.elapsed += dt;
+  state.metaRun.activeDuration += dt;
 
   updatePlayerMovement(dt);
   updatePlayerRegeneration(dt);
@@ -922,6 +1337,7 @@ function update(dt) {
   resolvePlayerEnemyDamage(dt, state.enemyGrid);
   updatePickups(dt);
   cleanupDeadEntities();
+  updateArchiveRunProgress(dt);
 
   state.hudTimer -= dt;
   if (state.hudTimer <= 0) {
@@ -2058,8 +2474,8 @@ function castBoneWard(mastery) {
     followPlayer: true,
     x: state.player.x,
     y: state.player.y,
-    life: 4.1 * (1 + state.player.skillDurationMultiplier) + mastery * 0.4,
-    maxLife: 4.1 * (1 + state.player.skillDurationMultiplier) + mastery * 0.4,
+    life: 4.6 * (1 + state.player.skillDurationMultiplier) + mastery * 0.45,
+    maxLife: 4.6 * (1 + state.player.skillDurationMultiplier) + mastery * 0.45,
     orbitCount: 4 + mastery,
     radius: 88 + mastery * 16,
     damage: 18 * state.player.skillDamageMultiplier,
@@ -2079,7 +2495,7 @@ function castBoneWard(mastery) {
         sourceType: "bone-ward",
         speed: 170 + mastery * 10,
         damage: 14 + mastery * 2,
-        life: 7 + mastery * 1.1,
+        life: 8.6 + mastery * 1.2,
         radius: 13,
       }
     );
@@ -2094,9 +2510,9 @@ function castRequiemField(mastery) {
     renderLayer: "top",
     x: cluster.x,
     y: cluster.y,
-    life: 3.8 * (1 + state.player.skillDurationMultiplier),
-    maxLife: 3.8 * (1 + state.player.skillDurationMultiplier),
-    radius: 134 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
+    life: 4.2 * (1 + state.player.skillDurationMultiplier),
+    maxLife: 4.2 * (1 + state.player.skillDurationMultiplier),
+    radius: 142 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
     damage: 11 * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
     interval: 0.18,
     tickTimer: 0.02,
@@ -2135,7 +2551,7 @@ function castGraveCall(mastery) {
       radius: Math.max(12, corpse.radius * 0.72),
       speed: 172 + mastery * 10,
       damage: 17 + mastery * 2.5,
-      life: 16 + mastery * 2.8,
+      life: 18 + mastery * 3,
     });
   }
   for (let index = 0; index < fallbackCount; index += 1) {
@@ -2147,7 +2563,7 @@ function castGraveCall(mastery) {
         sourceType: "phantom",
         speed: 176 + mastery * 12,
         damage: 15 + mastery * 2.2,
-        life: 11 + mastery * 1.8,
+        life: 13 + mastery * 2,
       }
     );
   }
@@ -2155,17 +2571,17 @@ function castGraveCall(mastery) {
 }
 
 function castVeinBurst(mastery) {
-  state.player.bloodGuardTimer = Math.max(state.player.bloodGuardTimer, 1.5 + mastery * 0.25);
+  state.player.bloodGuardTimer = Math.max(state.player.bloodGuardTimer, 1.55 + mastery * 0.24);
   pushEffect({
     kind: "vein-burst",
     renderLayer: "top",
     followPlayer: true,
     x: state.player.x,
     y: state.player.y,
-    life: 0.82,
-    maxLife: 0.82,
+    life: 0.84,
+    maxLife: 0.84,
     radius: 112 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: (68 + mastery * 12) * state.player.skillDamageMultiplier,
+    damage: (62 + mastery * 10) * state.player.skillDamageMultiplier,
     interval: 0.14,
     tickTimer: 0.01,
     color: "rgba(232, 126, 154, {a})",
@@ -2185,8 +2601,8 @@ function castCrimsonPool(mastery) {
     y: state.player.y,
     life: 4 * (1 + state.player.skillDurationMultiplier),
     maxLife: 4 * (1 + state.player.skillDurationMultiplier),
-    radius: 134 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: 20 * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
+    radius: 132 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
+    damage: 16.5 * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
     interval: 0.16,
     tickTimer: 0.02,
     color: "rgba(206, 82, 116, {a})",
@@ -2199,8 +2615,8 @@ function castCrimsonPool(mastery) {
 }
 
 function castBloodRite(mastery) {
-  state.player.bloodGuardTimer = Math.max(state.player.bloodGuardTimer, 2.4 + mastery * 0.35);
-  state.player.bloodRiteTimer = Math.max(state.player.bloodRiteTimer, 4.8 + mastery * 0.9);
+  state.player.bloodGuardTimer = Math.max(state.player.bloodGuardTimer, 2.25 + mastery * 0.34);
+  state.player.bloodRiteTimer = Math.max(state.player.bloodRiteTimer, 4.6 + mastery * 0.8);
   requestHudRefresh(false);
   pushEffect({
     kind: "blood-rite",
@@ -2476,6 +2892,7 @@ function spawnBoss(enemyType) {
   state.lastBossType = enemyType;
   state.enemies.push(boss);
   recordTelemetryBossSpawn(boss);
+  trackArchiveEvent("boss_spawned", { bossType: enemyType });
   spawnBossIntroEffect(boss);
   return boss;
 }
@@ -4521,7 +4938,11 @@ function healPlayer(amount) {
   if (amount <= 0) {
     return;
   }
-  state.player.hp = Math.min(state.player.maxHp, state.player.hp + amount * state.player.healingMultiplier);
+  const actualHeal = Math.max(0, Math.min(state.player.maxHp - state.player.hp, amount * state.player.healingMultiplier));
+  state.player.hp = Math.min(state.player.maxHp, state.player.hp + actualHeal);
+  if (actualHeal > 0) {
+    trackArchiveEvent("healed", { amount: actualHeal });
+  }
 }
 
 function dealDamageToEnemy(enemy, amount, source = "generic") {
@@ -4645,6 +5066,7 @@ function spawnNecroThrall(x, y, spec = {}) {
     orbitSeed: Math.random() * Math.PI * 2,
     dead: false,
   });
+  trackArchiveEvent("thrall_spawned");
   return true;
 }
 
@@ -4800,9 +5222,11 @@ function onEnemyDefeated(enemy, source = "unknown") {
     });
   }
   maybeRaiseThrall(enemy);
+  trackArchiveEvent("enemy_defeated", { enemy, source });
   if (enemy.isBoss) {
     recordTelemetryBossDefeat(enemy);
     state.bossDefeats[enemy.type] = (state.bossDefeats[enemy.type] ?? 0) + 1;
+    trackArchiveEvent("boss_defeated", { bossType: enemy.type, enemy, source });
     state.bossDirector.encounterIndex += 1;
     scheduleNextBossEncounter(state.elapsed);
     openBossRewardChoices(enemy);
@@ -4897,9 +5321,9 @@ function applyZoneTick(effect, enemy, distanceRatio = 1) {
     case "vein-burst":
     case "crimson-pool":
       applyEnemyBloodMark(enemy);
-      healPlayer(damage * (effect.kind === "crimson-pool" ? 0.055 : 0.075));
-      enemy.slowAmount = Math.max(enemy.slowAmount, effect.kind === "crimson-pool" ? 0.28 : 0.12);
-      enemy.slowTimer = Math.max(enemy.slowTimer, effect.kind === "crimson-pool" ? 0.42 : 0.2);
+      healPlayer(damage * (effect.kind === "crimson-pool" ? 0.04 : 0.055));
+      enemy.slowAmount = Math.max(enemy.slowAmount, effect.kind === "crimson-pool" ? 0.24 : 0.1);
+      enemy.slowTimer = Math.max(enemy.slowTimer, effect.kind === "crimson-pool" ? 0.34 : 0.16);
       break;
     default:
       break;
@@ -5795,6 +6219,93 @@ function renderResultStats() {
   ].join("");
 }
 
+function renderArchiveReveal() {
+  if (!archiveRevealPanel) {
+    return;
+  }
+  const entries = state.archiveRun.revealEntries;
+  if (entries.length <= 0) {
+    archiveRevealPanel.innerHTML = "";
+    archiveRevealPanel.classList.add("hidden");
+    return;
+  }
+
+  archiveRevealPanel.classList.remove("hidden");
+  archiveRevealPanel.innerHTML = [
+    `<div class="archive-reveal-head">`,
+    `<span class="archive-reveal-kicker">Archive Ignited</span>`,
+    `<strong>New Archive unlocks this run</strong>`,
+    `<span class="archive-reveal-meta">${entries.length} unlocked</span>`,
+    `</div>`,
+    `<div class="archive-reveal-grid">`,
+    entries.map((entry, index) => [
+      `<article class="archive-reveal-card" data-kind="${entry.kind}" style="animation-delay:${index * 90}ms">`,
+      `<div class="archive-reveal-card-glow"></div>`,
+      `<span class="archive-reveal-card-icon">${entry.icon}</span>`,
+      `<span class="archive-reveal-card-kicker">${entry.kind === "achievement" ? "Achievement" : "Challenge"}</span>`,
+      `<strong>${entry.title}</strong>`,
+      `<p>${entry.description}</p>`,
+      `</article>`,
+    ].join("")).join(""),
+    `</div>`,
+  ].join("");
+}
+
+function renderArchiveProgressCard() {
+  if (!archiveProgressCard) {
+    return;
+  }
+  const completedChallenges = getCompletedArchiveChallengeCount();
+  const completedAchievements = getCompletedArchiveAchievementCount();
+  const percent = Math.round(getArchiveChallengeProgressPercent() * 100);
+  const latest = getLatestArchiveUnlock();
+  const latestDef = latest
+    ? (latest.kind === "achievement" ? ARCHIVE_ACHIEVEMENT_MAP.get(latest.id) : ARCHIVE_CHALLENGE_MAP.get(latest.id))
+    : null;
+  const pinned = getPinnedArchiveChallenges().map((challenge) => [
+    `<div class="archive-progress-row">`,
+    `<span class="archive-progress-icon">${challenge.icon}</span>`,
+    `<div class="archive-progress-copy"><strong>${challenge.title}</strong><span>${challenge.description}</span></div>`,
+    `</div>`,
+  ].join("")).join("");
+
+  archiveProgressCard.innerHTML = [
+    `<div class="archive-progress-head">`,
+    `<div><span class="archive-progress-kicker">Archive Progress</span><strong>${completedChallenges} / ${ARCHIVE_CHALLENGES.length} Trials</strong></div>`,
+    `<div class="archive-progress-badge">${percent}%</div>`,
+    `</div>`,
+    `<div class="archive-progress-chips">`,
+    `<span class="archive-progress-chip">Achievements ${completedAchievements} / ${ARCHIVE_ACHIEVEMENTS.length}</span>`,
+    `<span class="archive-progress-chip">Completion ${percent}%</span>`,
+    `</div>`,
+    pinned
+      ? `<div class="archive-progress-list">${pinned}</div>`
+      : `<div class="archive-progress-empty">Every Archive Trial is complete. The archive now glows with full memory.</div>`,
+    latestDef ? `<div class="archive-progress-latest"><span>Latest unlock</span><strong>${latestDef.icon} ${latestDef.title}</strong></div>` : "",
+  ].join("");
+}
+
+function buildArchiveCodexEntries(entries, kind) {
+  return entries.map((entry) => {
+    const completed = kind === "achievement" ? hasCompletedArchiveAchievement(entry.id) : hasCompletedArchiveChallenge(entry.id);
+    return {
+      id: entry.id,
+      icon: entry.icon,
+      title: entry.title,
+      description: entry.description,
+      tier: kind === "achievement" ? "legendary" : entry.category === "boss" ? "rare" : entry.category === "class" ? "uncommon" : "common",
+      familyLabel: kind === "achievement" ? "Achievement" : entry.category === "class" ? `${CLASS_DEFS[entry.classId]?.title ?? "Class"} Trial` : `${entry.category} Trial`,
+      stacks: Number(completed),
+      maxStacks: 1,
+      locked: false,
+      isMaxed: completed,
+      status: kind === "achievement" ? getArchiveAchievementStatus(entry) : getArchiveChallengeStatus(entry),
+      archiveEntry: true,
+      archiveKind: kind,
+    };
+  });
+}
+
 function createUpgradeMetaMarkup(option) {
   const milestoneMarkup = option.milestone
     ? `<span class="upgrade-family upgrade-family-ascendant">Ascendant</span>`
@@ -5893,6 +6404,19 @@ function onUpgradeRowClick(event) {
   applyUpgradeById(row.dataset.upgradeId);
 }
 
+function onCodexTabClick(event) {
+  const button = event.target.closest("[data-codex-tab]");
+  if (!button || state.pause.devMenu) {
+    return;
+  }
+  const nextTab = button.dataset.codexTab;
+  if (!nextTab || state.pause.codexTab === nextTab) {
+    return;
+  }
+  state.pause.codexTab = nextTab;
+  refreshPauseOverlay();
+}
+
 function applyUpgradeById(id) {
   const upgrade = ALL_UPGRADES_BY_ID.get(id);
   const blessing = BOSS_BLESSING_LIBRARY.find((entry) => entry.id === id);
@@ -5905,6 +6429,7 @@ function applyUpgradeById(id) {
 
     blessing.apply(state);
     state.bossBlessings[id] = 1;
+    trackArchiveEvent("boss_blessing_picked", { id });
     updateHud(true);
     refreshPauseOverlay();
     return true;
@@ -5920,9 +6445,11 @@ function applyUpgradeById(id) {
         skillState.unlocked = true;
         skillState.timer = Math.min(skillState.timer, skillState.cooldown * 0.55);
         skillState.unlockPulseTimer = Math.max(skillState.unlockPulseTimer, 0.9);
+        trackArchiveEvent("skill_unlocked", { id });
       } else if (skillState.mastery < 2) {
         skillState.mastery += 1;
         skillState.unlockPulseTimer = Math.max(skillState.unlockPulseTimer, 0.7);
+        trackArchiveEvent("mastery_picked", { id });
       } else {
         return false;
       }
@@ -5945,6 +6472,7 @@ function applyUpgradeById(id) {
     state.upgrades[id] = stacks + 1;
     state.majorChoices[upgrade.pairId] = id;
     state.lastMajorPairId = upgrade.pairId;
+    trackArchiveEvent("major_picked", { id });
     updateHud(true);
     refreshPauseOverlay();
     return true;
@@ -5998,6 +6526,13 @@ function applyUpgradeOption(option, config = {}) {
   });
   if (option.family !== "skill" && option.family !== "mastery") {
     state.upgrades[option.id] = (state.upgrades[option.id] ?? 0) + 1;
+  }
+  if (option.family === "skill") {
+    trackArchiveEvent("skill_unlocked", { option });
+  } else if (option.family === "mastery") {
+    trackArchiveEvent("mastery_picked", { option });
+  } else if (rewardKind === "major") {
+    trackArchiveEvent("major_picked", { option });
   }
   if (!skipLevelFx) {
     spawnHolyLevelUpNova(state.player.x, state.player.y, state.progression.level);
@@ -6124,6 +6659,7 @@ function applyBossRewardOption(option) {
     bossName: state.bossReward.bossName,
   });
   state.bossBlessings[option.id] = (state.bossBlessings[option.id] ?? 0) + 1;
+  trackArchiveEvent("boss_blessing_picked", { option });
   state.bossReward.active = false;
   state.bossReward.bossType = null;
   state.bossReward.bossName = "";
@@ -6152,6 +6688,7 @@ function clearPause() {
   state.pause.focus = false;
   state.pause.upgradesPanel = false;
   state.pause.devMenu = false;
+  state.pause.codexTab = "build";
   refreshPauseOverlay();
 }
 
@@ -6170,11 +6707,20 @@ function refreshPauseOverlay() {
 
   renderDevToolsPanel();
   renderPauseMeta();
+  if (!state.pause.devMenu) {
+    for (const button of codexTabButtons) {
+      const active = button.dataset.codexTab === state.pause.codexTab;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    }
+    codexTabNav?.classList.remove("hidden");
+  }
   if (!state.pause.devMenu || state.dev.activeTab === "skills") {
     renderUpgradesCodex();
   }
   upgradesList.classList.toggle("hidden", state.pause.devMenu && state.dev.activeTab !== "skills");
   if (state.pause.devMenu) {
+    codexTabNav?.classList.add("hidden");
     menuKicker.classList.add("hidden");
     pauseTitle.textContent = "Developer Menu";
     pauseSubtitle.textContent = "Open with / on any layout. Use tabs to inspect upgrades, spawn enemies, tune the character, or switch class. Press / or Esc to resume.";
@@ -6202,6 +6748,7 @@ function toggleUpgradesPanel() {
   state.pause.devMenu = false;
   state.pause.upgradesPanel = true;
   state.pause.manual = true;
+  state.pause.codexTab = "build";
   pressedActions.clear();
   refreshPauseOverlay();
 }
@@ -6444,6 +6991,7 @@ function renderStartOverlay() {
     ].join("");
   }
 
+  renderArchiveProgressCard();
   startRunButton.textContent = `Start ${CLASS_DEFS[metaProgress.selectedClassId].title}`;
   startOverlay.classList.toggle("hidden", state.running);
 }
@@ -6511,6 +7059,9 @@ function compareCodexEntries(a, b) {
 function renderCodexSection(entries, clickableInDev, title = "", kicker = "", preserveOrder = false) {
   const section = document.createElement("section");
   section.className = "upgrade-group";
+  if (entries.some((entry) => entry.archiveEntry)) {
+    section.classList.add("archive-group");
+  }
 
   if (title) {
     const heading = document.createElement("div");
@@ -6526,6 +7077,10 @@ function renderCodexSection(entries, clickableInDev, title = "", kicker = "", pr
   for (const entry of orderedEntries) {
     const row = document.createElement(clickableInDev ? "button" : "div");
     row.className = "upgrade-row";
+    if (entry.archiveEntry) {
+      row.classList.add("archive-row");
+      row.dataset.archiveKind = entry.archiveKind ?? "challenge";
+    }
     row.dataset.upgradeId = entry.id;
 
     if (clickableInDev) {
@@ -6565,6 +7120,14 @@ function renderCodexSection(entries, clickableInDev, title = "", kicker = "", pr
 function renderUpgradesCodex() {
   upgradesList.innerHTML = "";
   const clickableInDev = state.pause.devMenu;
+  const archiveChallengeEntries = buildArchiveCodexEntries(ARCHIVE_CHALLENGES, "challenge");
+  const archiveAchievementEntries = buildArchiveCodexEntries(ARCHIVE_ACHIEVEMENTS, "achievement");
+  if (!state.pause.devMenu && state.pause.codexTab === "archive") {
+    renderCodexSection(archiveChallengeEntries, false, "Archive Trials", "Archive");
+    renderCodexSection(archiveAchievementEntries, false, "Achievements", "Achievement");
+    return;
+  }
+
   const ordinaryEntries = MINOR_UPGRADES.map((upgrade) => {
     const stacks = state.upgrades[upgrade.id] ?? 0;
     const locked = !clickableInDev && state.progression.level < upgrade.minLevel;

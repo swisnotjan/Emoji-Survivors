@@ -890,7 +890,7 @@ New passive intent:
 
 Recommended passive text:
 
-- "Basic attacks pierce and mark enemies. Nearby marked enemies feed your siphon, and kills may raise Thralls. Thrall hits heal you."
+- "Basic attacks pierce and mark enemies. Marked kills and necrotic skills call additional Thralls, and your summon cap is increased."
 
 ### Proximity engine
 

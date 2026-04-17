@@ -18,6 +18,7 @@
           <p id="startSubtitle" class="start-subtitle">Unlock classes in sequence by collecting XP and hunting specific enemies.</p>
           <div id="classSelectGrid" class="class-select-grid"></div>
           <div id="classProgressCard" class="class-progress-card"></div>
+          <div id="archiveProgressCard" class="archive-progress-card"></div>
           <div class="start-actions">
             <button id="startRunButton" type="button">Start Run</button>
           </div>
@@ -130,6 +131,7 @@
       </div>
 
       <div id="fpsValue" class="fps-readout">FPS 0</div>
+      <div id="archiveToastLayer" class="archive-toast-layer hidden" aria-live="polite"></div>
 
       <div id="touchControls" class="touch-controls hidden" aria-hidden="true">
         <div id="touchMoveZone" class="touch-move-zone">
@@ -179,6 +181,10 @@
           </div>
           <p id="pauseSubtitle" class="upgrades-subtitle">Review your build while the run is paused. Press Esc or Resume to continue.</p>
           <div id="pauseMeta" class="pause-meta"></div>
+          <div id="codexTabNav" class="codex-tab-nav">
+            <button type="button" class="codex-tab-button is-active" data-codex-tab="build">Build</button>
+            <button type="button" class="codex-tab-button" data-codex-tab="archive">Archive</button>
+          </div>
           <div id="devToolsPanel" class="dev-tools hidden">
             <div class="dev-tools-head">
               <span class="dev-chip">Dev</span>
@@ -314,6 +320,7 @@
           <p class="overlay-title">Run Over</p>
           <p id="resultValue">Survived 00:00 and defeated 0 enemies.</p>
           <div id="resultStats" class="result-stats"></div>
+          <div id="archiveRevealPanel" class="archive-reveal-panel hidden"></div>
           <button id="restartButton" type="button">Restart</button>
         </div>
       </div>
