@@ -19,7 +19,7 @@ await page.waitForTimeout(260);
 const afterCast = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
 await page.screenshot({ path: path.join(outDir, 'lab-manual-casts.png') });
 
-await page.click('#skillLabSpawnDummy');
+await page.evaluate(() => window.debug_game.spawnTrainingDummy(240, 0));
 await page.waitForTimeout(120);
 const afterExtraDummy = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
 await page.screenshot({ path: path.join(outDir, 'lab-extra-dummy.png') });

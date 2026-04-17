@@ -2110,9 +2110,11 @@ function drawAllies() {
       continue;
     }
     const alpha = clamp(ally.life / ally.maxLife, 0.3, 1);
-    ctx.fillStyle = `rgba(220, 203, 255, ${alpha})`;
+    const tint = ally.tint ?? "rgba(220, 203, 255, {a})";
+    const shadowTint = ally.shadowTint ?? "rgba(195, 151, 255, {a})";
+    ctx.fillStyle = tint.replace("{a}", alpha.toFixed(3));
     ctx.shadowBlur = 12;
-    ctx.shadowColor = `rgba(195, 151, 255, ${0.35 + alpha * 0.2})`;
+    ctx.shadowColor = shadowTint.replace("{a}", (0.35 + alpha * 0.2).toFixed(3));
     ctx.fillText(ally.emoji, pos.x, pos.y);
   }
   ctx.restore();
@@ -4422,7 +4424,7 @@ function damagePlayer(rawDamage, source = null) {
   }
 
   const player = state.player;
-  if (player.dash.iFramesTimer > 0) {
+  if (player.dash.iFramesTimer > 0 || state.dev.playerInvulnerable) {
     return;
   }
 

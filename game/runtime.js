@@ -90,13 +90,35 @@ function createInitialState(classId = "wind") {
       afterDashHaste: 0,
       afterDashPower: 0,
       afterDashBuffTimer: 0,
+      windRushTimer: 0,
+      windRushBonus: classId === "wind" ? 0.18 : 0,
       bloodRiteTimer: 0,
-      bloodCritChance: classId === "blood" ? 0.12 : 0,
-      bloodCritMultiplier: classId === "blood" ? 1.9 : 1.5,
-      lifesteal: classId === "blood" ? 0.08 : 0,
-      thrallLifestealPerHit: classId === "necro" ? 0.8 : 0,
+      lifesteal: classId === "blood" ? 0.11 : 0,
+      bloodGuardTimer: 0,
+      bloodStandReduction: classId === "blood" ? 0.08 : 0,
+      bloodPoolReduction: classId === "blood" ? 0.14 : 0,
+      bloodRiteReduction: classId === "blood" ? 0.22 : 0,
+      bloodMarkedReduction: classId === "blood" ? 0.03 : 0,
+      bloodCloseRangeBonus: classId === "blood" ? 0.08 : 0,
+      bloodRiteLifestealBonus: classId === "blood" ? 0.1 : 0,
+      frostCritChance: classId === "frost" ? 0.02 : 0,
+      frostCritMultiplier: classId === "frost" ? 1.85 : 1.5,
+      frostChilledCritBonus: classId === "frost" ? 0.14 : 0,
+      frostFrozenCritBonus: classId === "frost" ? 0.18 : 0,
+      frostBrittleCritBonus: classId === "frost" ? 0.26 : 0,
+      lastCritTimer: 0,
+      lastCritSource: null,
+      thrallLifestealPerHit: 0,
+      necroSummonCap: classId === "necro" ? 9 : 0,
+      necroRaiseChanceBonus: classId === "necro" ? 0.18 : 0,
+      necroSiphonHeal: 0,
+      necroSiphonReduction: 0,
+      necroSiphonRadius: 0,
+      necroSiphonThreshold: 0,
+      necroSiphonTickTimer: 0,
+      necroSiphonActive: false,
       weapon: {
-        fireInterval: 0.34,
+        fireInterval: 0.42,
         projectileSpeed: 470,
         projectileDamage: classDef.autoDamage,
         projectileRadius: 4.4,
@@ -105,13 +127,13 @@ function createInitialState(classId = "wind") {
         extraProjectiles: 0,
         spreadAngle: 0.1,
         targetingRange: 920,
-        knockback: classId === "wind" ? 240 : 150,
-        bossDamageMultiplier: 1,
+        knockback: classId === "wind" ? 320 : 34,
+        bossDamageMultiplier: classId === "wind" ? 0.9 : 1,
       },
       dash: {
         charges: 1,
         maxCharges: 1,
-        rechargeTime: 4.8,
+        rechargeTime: classId === "wind" ? 4.25 : 4.8,
         rechargeMultiplier: 0,
         rechargeTimer: 0,
         pulseIndex: -1,
@@ -185,11 +207,13 @@ function createInitialState(classId = "wind") {
       devMenu: false,
     },
     dev: {
+      activeTab: "skills",
       zenMode: false,
       bossChoice: "random",
       disableSpawns: false,
       manualSkillMode: false,
       zeroSkillCooldown: false,
+      playerInvulnerable: false,
     },
     bossDirector: {
       encounterIndex: 0,
@@ -286,7 +310,7 @@ function getSkillState(slot) {
 }
 
 function hasAffliction(enemy) {
-  return enemy.freezeTimer > 0 || enemy.brittleTimer > 0 || enemy.chillStacks > 0 || enemy.burnTimer > 0 || enemy.necroMarkTimer > 0 || enemy.bloodMarkTimer > 0;
+  return enemy.freezeTimer > 0 || enemy.brittleTimer > 0 || enemy.chillStacks > 0 || enemy.burnStacks > 0 || enemy.necroMarkTimer > 0 || enemy.bloodMarkTimer > 0;
 }
 
 function bindEvents() {
@@ -357,7 +381,7 @@ function bindEvents() {
       return;
     }
 
-    if (event.code === "Space" && state.running && !event.repeat) {
+    if (isDashEvent(event) && state.running && !isPauseActive() && !event.repeat) {
       if (!tryDash()) {
         triggerDashUnavailableFeedback();
       }
@@ -424,8 +448,38 @@ function bindEvents() {
     }
     clearPause();
   });
+  devTabNav.addEventListener("click", onDevTabClick);
+  grantAllUpgradesButton.addEventListener("click", () => window.debug_game?.grantAllUpgrades());
+  grantAllMinorButton.addEventListener("click", () => window.debug_game?.grantAllMinorUpgrades());
+  grantAllMajorButton.addEventListener("click", () => window.debug_game?.grantAllMajorUpgrades());
   spawnBossButton.addEventListener("click", handleSpawnBossClick);
-  zenModeButton.addEventListener("click", toggleZenMode);
+  clearEnemiesButton.addEventListener("click", () => window.debug_game?.clearEnemies());
+  setLevelButton.addEventListener("click", () => {
+    window.debug_game?.setPlayerLevel(Number(devLevelInput.value));
+  });
+  gainLevelButton.addEventListener("click", () => window.debug_game?.gainLevel(1));
+  setHpButton.addEventListener("click", () => {
+    window.debug_game?.setPlayerMaxHp(Number(devMaxHpInput.value));
+    window.debug_game?.setPlayerHp(Number(devHpInput.value));
+  });
+  setDashButton.addEventListener("click", () => {
+    window.debug_game?.setDashCharges(Number(devDashChargesInput.value), Number(devDashMaxInput.value));
+  });
+  toggleZenModeButton.addEventListener("click", () => {
+    window.debug_game?.setZenMode(!state.dev.zenMode);
+  });
+  toggleInvulnerableButton.addEventListener("click", () => {
+    window.debug_game?.setPlayerInvulnerable(!state.dev.playerInvulnerable);
+  });
+  toggleManualSkillsButton.addEventListener("click", () => {
+    window.debug_game?.setManualSkillMode(!state.dev.manualSkillMode);
+  });
+  toggleZeroCooldownButton.addEventListener("click", () => {
+    window.debug_game?.setSkillLabZeroCooldown(!state.dev.zeroSkillCooldown);
+  });
+  devEnemySpawnList.addEventListener("click", onDevEnemySpawnClick);
+  devSkillToggleList.addEventListener("click", onDevSkillToggleClick);
+  devClassButtons.addEventListener("click", onDevClassButtonClick);
   startRunButton.addEventListener("click", startRun);
   classSelectGrid.addEventListener("click", onClassCardClick);
   for (const card of [passiveSkillCard, ...skillCardElements.map((entry) => entry.root)]) {
@@ -702,7 +756,58 @@ function onTouchPointerEnd(event) {
 }
 
 function isDevToggleEvent(event) {
-  return event.code === "Backquote" || DEV_TOGGLE_KEYS.has(event.key);
+  return event.code === "Slash";
+}
+
+function isDashEvent(event) {
+  return event.code === "Space" || event.code === "ShiftLeft" || event.code === "ShiftRight";
+}
+
+function onDevTabClick(event) {
+  const button = event.target.closest("[data-dev-tab]");
+  if (!button) {
+    return;
+  }
+  setDevTab(button.dataset.devTab);
+}
+
+function onDevEnemySpawnClick(event) {
+  const button = event.target.closest("[data-enemy-type]");
+  if (!button) {
+    return;
+  }
+
+  const row = button.closest(".dev-spawn-row");
+  const countInput = row?.querySelector("input");
+  const count = Number(countInput?.value ?? 1);
+  window.debug_game?.spawnEnemy(button.dataset.enemyType, count);
+}
+
+function onDevSkillToggleClick(event) {
+  const button = event.target.closest("[data-skill-id]");
+  if (!button) {
+    return;
+  }
+
+  const enabled = button.dataset.skillEnabled === "true";
+  window.debug_game?.setSkillEnabled(button.dataset.skillId, !enabled);
+}
+
+function onDevClassButtonClick(event) {
+  const button = event.target.closest("[data-class-id]");
+  if (!button) {
+    return;
+  }
+
+  window.debug_game?.selectClass(button.dataset.classId);
+}
+
+function setDevTab(tabId) {
+  if (!["skills", "spawn", "character", "class"].includes(tabId)) {
+    return;
+  }
+  state.dev.activeTab = tabId;
+  refreshPauseOverlay();
 }
 
 function gameLoop(nowMs) {
@@ -846,7 +951,8 @@ function updatePlayerMovement(dt) {
   state.player.lastMoveX = normalizedX;
   state.player.lastMoveY = normalizedY;
   const haste = state.player.afterDashBuffTimer > 0 ? 1 + state.player.afterDashHaste : 1;
-  const moveSpeed = state.player.speed * state.player.speedMultiplier * haste;
+  const windRush = state.player.windRushTimer > 0 ? 1 + state.player.windRushBonus : 1;
+  const moveSpeed = state.player.speed * state.player.speedMultiplier * haste * windRush;
   moveCircleEntity(state.player, normalizedX * moveSpeed * dt, normalizedY * moveSpeed * dt, state.player.radius);
 }
 
@@ -914,13 +1020,89 @@ function updatePlayerRegeneration(dt) {
   player.hp = Math.min(player.maxHp, player.hp + player.regenPerSecond * player.healingMultiplier * dt);
 }
 
+function getPlayerMissingHpRatio() {
+  return clamp(1 - state.player.hp / Math.max(1, state.player.maxHp), 0, 0.85);
+}
+
+function updateNecroSiphon(dt) {
+  const player = state.player;
+  if (player.classId !== "necro") {
+    player.necroSiphonActive = false;
+    return;
+  }
+  const activeThralls = countActiveThralls();
+  player.necroSiphonActive = activeThralls >= Math.max(3, player.necroSummonCap - 4);
+}
+
 function updatePlayerClassBuffs(dt) {
   state.player.afterDashBuffTimer = Math.max(0, state.player.afterDashBuffTimer - dt);
+  state.player.windRushTimer = Math.max(0, state.player.windRushTimer - dt);
   state.player.bloodRiteTimer = Math.max(0, state.player.bloodRiteTimer - dt);
+  state.player.bloodGuardTimer = Math.max(0, state.player.bloodGuardTimer - dt);
+  state.player.lastCritTimer = Math.max(0, state.player.lastCritTimer - dt);
+  if (state.player.lastCritTimer <= 0) {
+    state.player.lastCritSource = null;
+  }
+  state.player.damageReduction = 0;
+  updateNecroSiphon(dt);
+  updateBloodHoldBonuses();
   for (const skill of state.player.skills) {
     skill.unlockPulseTimer = Math.max(0, skill.unlockPulseTimer - dt);
     skill.castFlashTimer = Math.max(0, skill.castFlashTimer - dt);
   }
+}
+
+function countActiveThralls() {
+  return state.allies.reduce((count, ally) => count + (!ally.dead && ally.kind === "thrall" ? 1 : 0), 0);
+}
+
+function isPointInsideEffect(x, y, effectKind) {
+  return state.effects.some((effect) => {
+    if (effect.life <= 0 || effect.kind !== effectKind) {
+      return false;
+    }
+    return Math.hypot(effect.x - x, effect.y - y) <= effect.radius;
+  });
+}
+
+function countNearbyBloodMarkedEnemies(radius) {
+  let count = 0;
+  visitEnemiesInRange(state.player.x, state.player.y, radius, (enemy) => {
+    if (enemy.dead || enemy.bloodMarkTimer <= 0) {
+      return;
+    }
+    if (Math.hypot(enemy.x - state.player.x, enemy.y - state.player.y) <= radius + enemy.radius) {
+      count += 1;
+    }
+  });
+  return count;
+}
+
+function updateBloodHoldBonuses() {
+  const player = state.player;
+  if (player.classId !== "blood") {
+    return;
+  }
+
+  const markedNearby = countNearbyBloodMarkedEnemies(178);
+  const insidePool = isPointInsideEffect(player.x, player.y, "crimson-pool");
+  const inRite = player.bloodRiteTimer > 0;
+  const guardActive = player.bloodGuardTimer > 0;
+
+  let reduction = 0;
+  if (markedNearby >= 2) {
+    reduction += player.bloodStandReduction + Math.min(0.06, (markedNearby - 2) * player.bloodMarkedReduction);
+  }
+  if (insidePool) {
+    reduction += player.bloodPoolReduction;
+  }
+  if (inRite) {
+    reduction += player.bloodRiteReduction;
+  }
+  if (guardActive) {
+    reduction += 0.12;
+  }
+  player.damageReduction = Math.max(player.damageReduction, Math.min(0.52, reduction));
 }
 
 function tryDash() {
@@ -956,7 +1138,9 @@ function tryDash() {
   }
   dash.activeTimer = dash.duration;
   dash.iFramesTimer = Math.max(dash.iFramesTimer, dash.invulnDuration);
-  player.afterDashBuffTimer = Math.max(player.afterDashBuffTimer, player.classId === "blood" ? 2.2 : 1.1);
+  if (player.classId === "wind") {
+    player.windRushTimer = Math.max(player.windRushTimer, 1.05);
+  }
   const speed = dash.distance / dash.duration;
   dash.vx = dirX * speed;
   dash.vy = dirY * speed;
@@ -1593,7 +1777,7 @@ function castPlayerSkill(skillState) {
       spawnPlayerAura("gale-ring", {
         radius: 118,
         life: 1.05,
-        damage: 52,
+        damage: 36,
         interval: 0.22,
         color: "rgba(176, 229, 237, {a})",
         secondaryColor: "rgba(116, 187, 214, {a})",
@@ -1613,7 +1797,7 @@ function castPlayerSkill(skillState) {
       spawnPlayerAura("blizzard-wake", {
         radius: 126,
         life: 1.2,
-        damage: 24,
+        damage: 18,
         interval: 0.18,
         color: "rgba(176, 228, 255, {a})",
         secondaryColor: "rgba(84, 156, 239, {a})",
@@ -1633,7 +1817,7 @@ function castPlayerSkill(skillState) {
       spawnPlayerAura("cinder-halo", {
         radius: 122,
         life: 1.05,
-        damage: 34,
+        damage: 28,
         interval: 0.18,
         color: "rgba(255, 197, 84, {a})",
         secondaryColor: "rgba(232, 86, 34, {a})",
@@ -1671,6 +1855,9 @@ function castPlayerSkill(skillState) {
       didCast = false;
   }
   if (didCast) {
+    if (state.player.classId === "wind") {
+      state.player.windRushTimer = Math.max(state.player.windRushTimer, 1.45);
+    }
     spawnSkillCastAccent(skillDef.id, state.player.x, state.player.y);
     skillState.castFlashTimer = Math.max(skillState.castFlashTimer, 0.45);
   }
@@ -1721,7 +1908,7 @@ function castCrosswindStrip() {
     maxLife: 1.25 * (1 + state.player.skillDurationMultiplier),
     length: 340 * (1 + state.player.skillAreaMultiplier),
     width: 76 * (1 + state.player.skillAreaMultiplier),
-    damage: 26 * state.player.skillDamageMultiplier,
+    damage: 20 * state.player.skillDamageMultiplier,
     interval: 0.18,
     tickTimer: 0.01,
     color: "rgba(236, 248, 255, {a})",
@@ -1747,7 +1934,7 @@ function castTempestNode(mastery) {
     life: 3.1 * (1 + state.player.skillDurationMultiplier) + mastery * 0.35,
     maxLife: 3.1 * (1 + state.player.skillDurationMultiplier) + mastery * 0.35,
     radius: 136 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: 20 * state.player.skillDamageMultiplier,
+    damage: 16 * state.player.skillDamageMultiplier,
     interval: 0.16,
     tickTimer: 0.01,
     color: "rgba(169, 230, 236, {a})",
@@ -1773,7 +1960,7 @@ function castPermafrostSeal(mastery) {
     maxLife: 2.9 * (1 + state.player.skillDurationMultiplier),
     armTime: 0.65,
     radius: 132 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: 42 * state.player.skillDamageMultiplier,
+    damage: 30 * state.player.skillDamageMultiplier,
     burstDone: false,
     color: "rgba(186, 235, 255, {a})",
     secondaryColor: "rgba(76, 156, 236, {a})",
@@ -1827,7 +2014,7 @@ function castSunspot(mastery) {
     life: 3.4 * (1 + state.player.skillDurationMultiplier) + mastery * 0.3,
     maxLife: 3.4 * (1 + state.player.skillDurationMultiplier) + mastery * 0.3,
     radius: 126 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: 28 * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
+    damage: 26 * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
     interval: 0.18,
     tickTimer: 0.02,
     color: "rgba(255, 201, 92, {a})",
@@ -1853,7 +2040,7 @@ function castAshComet(mastery) {
     maxLife: 1.1,
     armTime: 0.52,
     radius: 86 * (1 + state.player.skillAreaMultiplier),
-    damage: (120 + mastery * 20) * state.player.skillDamageMultiplier,
+    damage: (132 + mastery * 20) * state.player.skillDamageMultiplier,
     burstDone: false,
     color: "rgba(255, 214, 120, {a})",
     secondaryColor: "rgba(226, 72, 18, {a})",
@@ -1873,10 +2060,10 @@ function castBoneWard(mastery) {
     y: state.player.y,
     life: 4.1 * (1 + state.player.skillDurationMultiplier) + mastery * 0.4,
     maxLife: 4.1 * (1 + state.player.skillDurationMultiplier) + mastery * 0.4,
-    orbitCount: 3 + mastery,
+    orbitCount: 4 + mastery,
     radius: 88 + mastery * 16,
-    damage: 30 * state.player.skillDamageMultiplier,
-    interval: 0.16,
+    damage: 18 * state.player.skillDamageMultiplier,
+    interval: 0.2,
     tickTimer: 0.02,
     color: "rgba(170, 239, 202, {a})",
     secondaryColor: "rgba(66, 176, 120, {a})",
@@ -1884,11 +2071,24 @@ function castBoneWard(mastery) {
     lightColor: "rgba(224, 255, 240, {a})",
     tailLife: 0.3,
   });
+  for (let index = 0; index < 2 + mastery; index += 1) {
+    spawnNecroThrall(
+      state.player.x + Math.cos((index / Math.max(1, 2 + mastery)) * Math.PI * 2) * 42,
+      state.player.y + Math.sin((index / Math.max(1, 2 + mastery)) * Math.PI * 2) * 42,
+      {
+        sourceType: "bone-ward",
+        speed: 170 + mastery * 10,
+        damage: 14 + mastery * 2,
+        life: 7 + mastery * 1.1,
+        radius: 13,
+      }
+    );
+  }
   return true;
 }
 
 function castRequiemField(mastery) {
-  const cluster = findDensestEnemyCluster(state.player.x, state.player.y, 220, 860) ?? { x: state.player.x, y: state.player.y };
+  const cluster = findDensestEnemyCluster(state.player.x, state.player.y, 180, 460) ?? { x: state.player.x, y: state.player.y };
   pushEffect({
     kind: "requiem-field",
     renderLayer: "top",
@@ -1897,7 +2097,7 @@ function castRequiemField(mastery) {
     life: 3.8 * (1 + state.player.skillDurationMultiplier),
     maxLife: 3.8 * (1 + state.player.skillDurationMultiplier),
     radius: 134 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: 20 * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
+    damage: 11 * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
     interval: 0.18,
     tickTimer: 0.02,
     color: "rgba(160, 232, 198, {a})",
@@ -1926,60 +2126,47 @@ function castGraveCall(mastery) {
   });
   const nearbyCorpses = state.corpses
     .filter((corpse) => Math.hypot(corpse.x - state.player.x, corpse.y - state.player.y) < 520)
-    .slice(0, 2 + mastery);
-  if (nearbyCorpses.length === 0) {
-    state.allies.push({
-      id: state.nextEntityId++,
-      kind: "thrall",
-      sourceType: "phantom",
-      emoji: "\ud83d\udc80",
-      x: state.player.x + randRange(-34, 34),
-      y: state.player.y + randRange(-34, 34),
-      radius: 14,
-      speed: 150,
-      damage: 12 + mastery * 2,
-      life: 12 + mastery * 2,
-      maxLife: 12 + mastery * 2,
-      hitCooldown: 0,
-      orbitSeed: Math.random() * Math.PI * 2,
-      dead: false,
-    });
-    return true;
-  }
+    .slice(0, 3 + mastery);
+  const fallbackCount = Math.max(3, 3 + mastery - nearbyCorpses.length);
   for (const corpse of nearbyCorpses) {
     corpse.life = 0;
-    state.allies.push({
-      id: state.nextEntityId++,
-      kind: "thrall",
+    spawnNecroThrall(corpse.x, corpse.y, {
       sourceType: corpse.type,
-      emoji: ENEMY_ARCHETYPES[corpse.type]?.emoji ?? "\ud83d\udc80",
-      x: corpse.x,
-      y: corpse.y,
       radius: Math.max(12, corpse.radius * 0.72),
-      speed: 158 + mastery * 10,
-      damage: 12 + mastery * 2,
-      life: 15 + mastery * 2.5,
-      maxLife: 15 + mastery * 2.5,
-      hitCooldown: 0,
-      orbitSeed: Math.random() * Math.PI * 2,
-      dead: false,
+      speed: 172 + mastery * 10,
+      damage: 17 + mastery * 2.5,
+      life: 16 + mastery * 2.8,
     });
+  }
+  for (let index = 0; index < fallbackCount; index += 1) {
+    const angle = (index / Math.max(1, fallbackCount)) * Math.PI * 2 + randRange(-0.22, 0.22);
+    spawnNecroThrall(
+      state.player.x + Math.cos(angle) * randRange(24, 56),
+      state.player.y + Math.sin(angle) * randRange(24, 56),
+      {
+        sourceType: "phantom",
+        speed: 176 + mastery * 12,
+        damage: 15 + mastery * 2.2,
+        life: 11 + mastery * 1.8,
+      }
+    );
   }
   return true;
 }
 
 function castVeinBurst(mastery) {
+  state.player.bloodGuardTimer = Math.max(state.player.bloodGuardTimer, 1.5 + mastery * 0.25);
   pushEffect({
     kind: "vein-burst",
     renderLayer: "top",
     followPlayer: true,
     x: state.player.x,
     y: state.player.y,
-    life: 0.68,
-    maxLife: 0.68,
+    life: 0.82,
+    maxLife: 0.82,
     radius: 112 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: (84 + mastery * 14) * state.player.skillDamageMultiplier,
-    interval: 0.12,
+    damage: (68 + mastery * 12) * state.player.skillDamageMultiplier,
+    interval: 0.14,
     tickTimer: 0.01,
     color: "rgba(232, 126, 154, {a})",
     secondaryColor: "rgba(124, 20, 49, {a})",
@@ -1991,19 +2178,15 @@ function castVeinBurst(mastery) {
 }
 
 function castCrimsonPool(mastery) {
-  const cluster = findDensestEnemyCluster(state.player.x, state.player.y, 220, 860);
-  if (!cluster) {
-    return false;
-  }
   pushEffect({
     kind: "crimson-pool",
     renderLayer: "top",
-    x: cluster.x,
-    y: cluster.y,
-    life: 3.6 * (1 + state.player.skillDurationMultiplier),
-    maxLife: 3.6 * (1 + state.player.skillDurationMultiplier),
-    radius: 122 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: 24 * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
+    x: state.player.x,
+    y: state.player.y,
+    life: 4 * (1 + state.player.skillDurationMultiplier),
+    maxLife: 4 * (1 + state.player.skillDurationMultiplier),
+    radius: 134 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
+    damage: 20 * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
     interval: 0.16,
     tickTimer: 0.02,
     color: "rgba(206, 82, 116, {a})",
@@ -2016,8 +2199,9 @@ function castCrimsonPool(mastery) {
 }
 
 function castBloodRite(mastery) {
-  state.player.afterDashBuffTimer = Math.max(state.player.afterDashBuffTimer, 4.2 + mastery * 0.8);
-  state.player.bloodRiteTimer = Math.max(state.player.bloodRiteTimer, 4.2 + mastery * 0.8);
+  state.player.bloodGuardTimer = Math.max(state.player.bloodGuardTimer, 2.4 + mastery * 0.35);
+  state.player.bloodRiteTimer = Math.max(state.player.bloodRiteTimer, 4.8 + mastery * 0.9);
+  requestHudRefresh(false);
   pushEffect({
     kind: "blood-rite",
     renderLayer: "top",
@@ -2073,32 +2257,36 @@ function spawnEnemies(dt) {
     return;
   }
   const director = state.spawnDirector;
-  const pressure = Math.min(1, state.elapsed / 190);
+  const pressure = Math.min(1.2, state.elapsed / 195);
+  const latePressure = Math.max(0, state.elapsed - 170) / 230;
   const bossActive = hasLivingBoss();
   let ambientEnemyCount = state.enemies.reduce(
     (total, enemy) => total + (enemy.isBoss ? 0 : 1),
     0
   );
   let dynamicInterval =
-    director.baseInterval - pressure * (director.baseInterval - director.minInterval);
+    director.baseInterval - Math.min(1, pressure) * (director.baseInterval - director.minInterval);
+  dynamicInterval *= Math.max(0.62, 1 - Math.min(0.34, latePressure * 0.28));
   if (bossActive) {
     dynamicInterval *= SPAWN_DIRECTOR_CONFIG.bossSpawnIntervalMultiplier;
   }
+  const dynamicMaxEnemies = Math.round(director.maxEnemiesOnField * (1 + Math.min(0.55, latePressure * 0.34)));
+  const dynamicBossAmbientCap = Math.round(SPAWN_DIRECTOR_CONFIG.bossAmbientCap * (1 + Math.min(0.4, latePressure * 0.22)));
 
   director.timer -= dt;
 
   let safety = 0;
-  const safetyLimit = bossActive ? 2 : 8;
+  const safetyLimit = bossActive ? 3 : 10;
   while (director.timer <= 0 && safety < safetyLimit) {
     director.timer += dynamicInterval;
     safety += 1;
 
-    if (state.enemies.length >= director.maxEnemiesOnField) {
+    if (state.enemies.length >= dynamicMaxEnemies) {
       director.timer = Math.max(director.timer, 0.06);
       return;
     }
 
-    if (bossActive && ambientEnemyCount >= SPAWN_DIRECTOR_CONFIG.bossAmbientCap) {
+    if (bossActive && ambientEnemyCount >= dynamicBossAmbientCap) {
       director.timer = Math.max(director.timer, 0.18);
       return;
     }
@@ -2111,7 +2299,7 @@ function spawnEnemies(dt) {
 
     const spawnCount = bossActive ? 1 : plan.count;
     for (let i = 0; i < spawnCount; i += 1) {
-      if (state.enemies.length >= director.maxEnemiesOnField) {
+      if (state.enemies.length >= dynamicMaxEnemies) {
         return;
       }
       state.enemies.push(createEnemy(plan.type, anchor, i, spawnCount));
@@ -2373,9 +2561,11 @@ function createEnemy(enemyType, anchor, index, totalCount, options = {}) {
     chillStacks: 0,
     chillDecayTimer: 0,
     freezeTimer: 0,
+    freezeResist: 0,
+    freezeResistTimer: 0,
     brittleTimer: 0,
-    burnTimer: 0,
-    burnDamage: 0,
+    burnStacks: 0,
+    burnStackTimer: 0,
     burnTickTimer: 0,
     necroMarkTimer: 0,
     bloodMarkTimer: 0,
@@ -2463,6 +2653,7 @@ function updateEnemiesAndSpatialGrid(dt) {
       enemy.statusFlash[key] = Math.max(0, enemy.statusFlash[key] - dt);
     }
     enemy.freezeTimer = Math.max(0, enemy.freezeTimer - dt);
+    enemy.freezeResistTimer = Math.max(0, enemy.freezeResistTimer - dt);
     enemy.brittleTimer = Math.max(0, enemy.brittleTimer - dt);
     enemy.necroMarkTimer = Math.max(0, enemy.necroMarkTimer - dt);
     enemy.bloodMarkTimer = Math.max(0, enemy.bloodMarkTimer - dt);
@@ -2480,17 +2671,18 @@ function updateEnemiesAndSpatialGrid(dt) {
       }
     }
 
-    if (enemy.burnTimer > 0) {
-      enemy.burnTimer -= dt;
+    if (enemy.burnStacks > 0) {
+      enemy.burnStackTimer -= dt;
       enemy.burnTickTimer -= dt;
       if (enemy.burnTickTimer <= 0) {
         enemy.burnTickTimer += 0.34;
-        const burnDamage = enemy.burnDamage * (enemy.isBoss ? 0.4 : 1);
+        const stackScale = enemy.isBoss ? 0.78 : 1;
+        const burnDamage = enemy.burnStacks * 9.4 * stackScale;
         dealDamageToEnemy(enemy, burnDamage * dt * 3, "burn");
       }
-      if (enemy.burnTimer <= 0) {
-        enemy.burnTimer = 0;
-        enemy.burnDamage = 0;
+      if (enemy.burnStackTimer <= 0) {
+        enemy.burnStacks = Math.max(0, enemy.burnStacks - 1);
+        enemy.burnStackTimer = enemy.burnStacks > 0 ? (enemy.isBoss ? 0.44 : 0.58) : 0;
       }
     }
 
@@ -4005,8 +4197,62 @@ function updateAllies(dt) {
     const drift = 0.18 * Math.sin(state.elapsed * 2.6 + ally.orbitSeed);
     const moveX = dx / length + (-dy / length) * drift;
     const moveY = dy / length + (dx / length) * drift;
-    moveCircleEntity(ally, (moveX / Math.hypot(moveX, moveY)) * ally.speed * dt, (moveY / Math.hypot(moveX, moveY)) * ally.speed * dt, ally.radius, { water: false, solids: false });
+    const requiemBonus = getRequiemFieldBonusAt(ally.x, ally.y);
+    moveCircleEntity(
+      ally,
+      (moveX / Math.hypot(moveX, moveY)) * ally.speed * requiemBonus.speedMultiplier * dt,
+      (moveY / Math.hypot(moveX, moveY)) * ally.speed * requiemBonus.speedMultiplier * dt,
+      ally.radius,
+      { water: false, solids: false }
+    );
   }
+
+  resolveAllySeparation();
+}
+
+function resolveAllySeparation() {
+  for (let i = 0; i < state.allies.length; i += 1) {
+    const allyA = state.allies[i];
+    if (!allyA || allyA.dead) {
+      continue;
+    }
+    for (let j = i + 1; j < state.allies.length; j += 1) {
+      const allyB = state.allies[j];
+      if (!allyB || allyB.dead) {
+        continue;
+      }
+      const dx = allyB.x - allyA.x;
+      const dy = allyB.y - allyA.y;
+      const distance = Math.hypot(dx, dy) || 0.0001;
+      const minDistance = allyA.radius + allyB.radius;
+      if (distance >= minDistance) {
+        continue;
+      }
+      const overlap = minDistance - distance;
+      const pushX = (dx / distance) * overlap * 0.5;
+      const pushY = (dy / distance) * overlap * 0.5;
+      allyA.x -= pushX;
+      allyA.y -= pushY;
+      allyB.x += pushX;
+      allyB.y += pushY;
+    }
+  }
+}
+
+function getRequiemFieldBonusAt(x, y) {
+  let speedMultiplier = 1;
+  let damageMultiplier = 1;
+  for (const effect of state.effects) {
+    if (effect.life <= 0 || effect.kind !== "requiem-field") {
+      continue;
+    }
+    if (Math.hypot(effect.x - x, effect.y - y) > effect.radius) {
+      continue;
+    }
+    speedMultiplier = Math.max(speedMultiplier, 1.18);
+    damageMultiplier = Math.max(damageMultiplier, 1.22);
+  }
+  return { speedMultiplier, damageMultiplier };
 }
 
 function resolveAllyEnemyCollisions(grid) {
@@ -4030,7 +4276,8 @@ function resolveAllyEnemyCollisions(grid) {
           if (!circlesOverlap(ally.x, ally.y, ally.radius, enemy.x, enemy.y, enemy.radius)) {
             continue;
           }
-          dealDamageToEnemy(enemy, ally.damage, "thrall");
+          const requiemBonus = getRequiemFieldBonusAt(ally.x, ally.y);
+          dealDamageToEnemy(enemy, ally.damage * requiemBonus.damageMultiplier, ally.sourceType === "bone-ward" ? "bone-ward" : "thrall");
           applyEnemyNecroMark(enemy);
           ally.hitCooldown = 0.42;
           healPlayer(state.player.thrallLifestealPerHit);
@@ -4136,15 +4383,19 @@ function setEnemyStatusFlash(enemy, type, duration) {
 
 function applyEnemyBurn(enemy, strength, duration) {
   const potency = 1 + state.player.statusPotency;
-  enemy.burnTimer = Math.max(enemy.burnTimer, duration * state.player.statusDurationMultiplier);
-  enemy.burnDamage = Math.max(enemy.burnDamage, strength * potency);
+  const stacksToAdd = Math.max(1, Math.round(strength * potency * (enemy.isBoss ? 0.35 : 0.26)));
+  const maxStacks = enemy.isBoss ? 12 : 8;
+  enemy.burnStacks = Math.min(maxStacks, enemy.burnStacks + stacksToAdd);
+  enemy.burnStackTimer = Math.max(enemy.burnStackTimer, duration * state.player.statusDurationMultiplier);
   enemy.burnTickTimer = Math.min(enemy.burnTickTimer || 0.22, 0.22);
   setEnemyStatusFlash(enemy, "burn", 0.45);
 }
 
 function applyEnemyChill(enemy, amount, duration) {
   const potency = 1 + state.player.statusPotency;
-  const effectiveAmount = amount * potency * (1 - enemy.controlResist);
+  const frostBossControlFloor = state.player.classId === "frost" && enemy.isBoss ? 0.52 : 0;
+  const controlMultiplier = Math.max(frostBossControlFloor, 1 - enemy.controlResist);
+  const effectiveAmount = amount * potency * controlMultiplier;
   enemy.chillStacks = Math.min(enemy.isBoss ? 5 : 6, enemy.chillStacks + effectiveAmount);
   enemy.chillDecayTimer = Math.max(enemy.chillDecayTimer, duration * state.player.statusDurationMultiplier);
   enemy.slowAmount = Math.max(enemy.slowAmount, 0.15 + enemy.chillStacks * 0.08);
@@ -4155,7 +4406,13 @@ function applyEnemyChill(enemy, amount, duration) {
   if (enemy.chillStacks >= freezeThreshold) {
     enemy.chillStacks = 0;
     enemy.chillDecayTimer = 0;
-    enemy.freezeTimer = Math.max(enemy.freezeTimer, enemy.isBoss ? 0.4 : 0.85 * (1 - enemy.controlResist));
+    const baseFreezeDuration = enemy.isBoss ? 0.42 : 0.9;
+    const resistScale = enemy.isBoss ? Math.max(0.24, 1 - enemy.freezeResist) : 1;
+    enemy.freezeTimer = Math.max(enemy.freezeTimer, baseFreezeDuration * (1 - enemy.controlResist) * resistScale);
+    if (enemy.isBoss) {
+      enemy.freezeResist = Math.min(0.72, enemy.freezeResist + 0.24);
+      enemy.freezeResistTimer = 4.6;
+    }
     enemy.brittleTimer = Math.max(enemy.brittleTimer, enemy.isBoss ? 1.2 : 1.75);
     enemy.slowAmount = Math.max(enemy.slowAmount, enemy.isBoss ? 0.5 : 0.95);
     enemy.slowTimer = Math.max(enemy.slowTimer, enemy.freezeTimer);
@@ -4222,7 +4479,7 @@ function empowerNearbyEnemies(source, radius, amount, duration, includeBosses = 
   });
 }
 
-function computePlayerProjectileDamage(enemy) {
+function computePlayerProjectileDamage(enemy, projectile) {
   let damage = state.player.weapon.projectileDamage;
   if (enemy.isBoss) {
     damage *= state.player.weapon.bossDamageMultiplier;
@@ -4237,10 +4494,23 @@ function computePlayerProjectileDamage(enemy) {
     damage *= 1 + state.player.afterDashPower;
   }
   let crit = false;
-  if (state.player.classId === "blood") {
-    const critChance = state.player.bloodCritChance + (state.player.afterDashBuffTimer > 0 ? 0.1 : 0) + (state.player.bloodRiteTimer > 0 ? 0.12 : 0);
+  if (state.player.classId === "frost") {
+    let critChance = state.player.frostCritChance;
+    if (enemy.chillStacks > 0) {
+      critChance += state.player.frostChilledCritBonus;
+    }
+    if (enemy.freezeTimer > 0) {
+      critChance += state.player.frostFrozenCritBonus;
+    }
+    if (enemy.brittleTimer > 0) {
+      critChance += state.player.frostBrittleCritBonus;
+    }
+    if (projectile?.skillType === "crystal-spear" && enemy.brittleTimer > 0) {
+      critChance = 1;
+    }
     if (Math.random() < critChance) {
-      damage *= state.player.bloodCritMultiplier;
+      const critMultiplier = projectile?.skillType === "crystal-spear" ? 2.1 : state.player.frostCritMultiplier;
+      damage *= critMultiplier;
       crit = true;
     }
   }
@@ -4349,33 +4619,54 @@ function spawnDamageNumber(x, y, amount, source) {
   });
 }
 
+function spawnNecroThrall(x, y, spec = {}) {
+  if (state.player.classId !== "necro") {
+    return false;
+  }
+  if (countActiveThralls() >= state.player.necroSummonCap) {
+    return false;
+  }
+  const life = spec.life ?? 14;
+  state.allies.push({
+    id: state.nextEntityId++,
+    kind: "thrall",
+    sourceType: spec.sourceType ?? "phantom",
+    emoji: "\u2620",
+    tint: "rgba(72, 255, 122, {a})",
+    shadowTint: "rgba(72, 255, 122, {a})",
+    x,
+    y,
+    radius: spec.radius ?? 14,
+    speed: spec.speed ?? 168,
+    damage: spec.damage ?? 15,
+    life,
+    maxLife: life,
+    hitCooldown: 0,
+    orbitSeed: Math.random() * Math.PI * 2,
+    dead: false,
+  });
+  return true;
+}
+
 function maybeRaiseThrall(enemy) {
   if (state.player.classId !== "necro" || enemy.isBoss) {
     return;
   }
-  const activeThralls = state.allies.filter((ally) => !ally.dead && ally.kind === "thrall").length;
-  if (activeThralls >= 6) {
+  const activeThralls = countActiveThralls();
+  if (activeThralls >= state.player.necroSummonCap) {
     return;
   }
-  const chance = enemy.type === "grunt" || enemy.type === "runner" ? 0.24 : enemy.type === "tank" ? 0.2 : 0.16;
+  const baseChance = enemy.type === "grunt" || enemy.type === "runner" ? 0.22 : enemy.type === "tank" ? 0.18 : 0.14;
+  const chance = baseChance + state.player.necroRaiseChanceBonus + (enemy.necroMarkTimer > 0 ? 0.18 : 0);
   if (Math.random() > chance) {
     return;
   }
-  state.allies.push({
-    id: state.nextEntityId++,
-    kind: "thrall",
+  spawnNecroThrall(enemy.x, enemy.y, {
     sourceType: enemy.type,
-    emoji: enemy.emoji,
-    x: enemy.x,
-    y: enemy.y,
     radius: Math.max(12, enemy.radius * 0.76),
-    speed: enemy.speed * 0.82,
-    damage: 11 + enemy.radius * 0.12,
+    speed: enemy.speed * 0.88,
+    damage: 14 + enemy.radius * 0.18,
     life: 16,
-    maxLife: 16,
-    hitCooldown: 0,
-    orbitSeed: Math.random() * Math.PI * 2,
-    dead: false,
   });
 }
 
@@ -4408,9 +4699,10 @@ function resolveProjectileEnemyCollisions(grid) {
             continue;
           }
 
-          const damageInfo = projectile.owner === "player" ? computePlayerProjectileDamage(enemy) : { damage: projectile.damage, crit: false };
+          const playerOwned = projectile.owner === "player" || projectile.owner === "skill";
+          const damageInfo = playerOwned ? computePlayerProjectileDamage(enemy, projectile) : { damage: projectile.damage, crit: false };
           applyHitResponse(enemy, projectile, state.player.weapon, damageInfo.crit);
-          dealDamageToEnemy(enemy, damageInfo.damage, projectile.owner ?? "projectile");
+          dealDamageToEnemy(enemy, damageInfo.damage, projectile.skillType ?? projectile.owner ?? "projectile");
 
           projectile.pierce -= 1;
 
@@ -4452,18 +4744,29 @@ function applyHitResponse(enemy, projectile, weapon, crit = false) {
   }
 
   if (passiveType === "frost") {
-    applyEnemyChill(enemy, enemy.isBoss ? 0.8 : 1.2, 2.1);
+    applyEnemyChill(enemy, enemy.isBoss ? 1 : 1.5, 2.3);
   } else if (passiveType === "fire") {
-    applyEnemyBurn(enemy, enemy.isBoss ? 8 : 11, 3.1);
+    applyEnemyBurn(enemy, enemy.isBoss ? 3 : 4, 3.1);
   } else if (passiveType === "necro") {
     applyEnemyNecroMark(enemy);
   } else if (passiveType === "blood") {
     applyEnemyBloodMark(enemy);
   }
 
+  if (crit) {
+    state.player.lastCritTimer = Math.max(state.player.lastCritTimer, 0.5);
+    state.player.lastCritSource = projectile.skillType ?? "auto";
+  }
+
   if (state.player.classId === "blood") {
-    const lifestealRatio = state.player.lifesteal + (state.player.afterDashBuffTimer > 0 ? 0.04 : 0) + (state.player.bloodRiteTimer > 0 ? 0.05 : 0);
-    healPlayer(projectile.damage * lifestealRatio * (crit ? 1.2 : 1));
+    const closeRange = Math.hypot(enemy.x - state.player.x, enemy.y - state.player.y) <= 182;
+    const insidePool = isPointInsideEffect(state.player.x, state.player.y, "crimson-pool");
+    const lifestealRatio =
+      state.player.lifesteal +
+      (state.player.bloodRiteTimer > 0 ? state.player.bloodRiteLifestealBonus : 0) +
+      (insidePool ? 0.06 : 0) +
+      (closeRange ? state.player.bloodCloseRangeBonus : 0);
+    healPlayer(weapon.projectileDamage * lifestealRatio);
   }
 
   spawnHitEffect(enemy.x, enemy.y, passiveType === "fire" ? "ember" : passiveType === "frost" ? "icy" : passiveType === "wind" ? "holy" : "arcane", dirX, dirY);
@@ -4483,7 +4786,8 @@ function onEnemyDefeated(enemy, source = "unknown") {
   if (state.player.onKillHeal > 0) {
     state.player.hp = Math.min(state.player.maxHp, state.player.hp + state.player.onKillHeal);
   }
-  if (state.player.classId === "fire" && enemy.burnTimer > 0) {
+  if (state.player.classId === "fire" && enemy.burnStacks > 0) {
+    const spreadStrength = Math.max(1, Math.ceil(enemy.burnStacks * 0.5));
     visitEnemiesInRange(enemy.x, enemy.y, 150, (nearby) => {
       if (nearby.dead || nearby.id === enemy.id) {
         return;
@@ -4492,7 +4796,7 @@ function onEnemyDefeated(enemy, source = "unknown") {
       if (distance > 150) {
         return;
       }
-      applyEnemyBurn(nearby, nearby.isBoss ? 5 : 8, 2.2);
+      applyEnemyBurn(nearby, spreadStrength * (nearby.isBoss ? 0.8 : 1), 2.2);
     });
   }
   maybeRaiseThrall(enemy);
@@ -4578,28 +4882,72 @@ function applyZoneTick(effect, enemy, distanceRatio = 1) {
       break;
     case "blizzard-wake":
     case "permafrost-seal":
-      applyEnemyChill(enemy, enemy.isBoss ? 0.7 : 1.1, 1.8);
+      applyEnemyChill(enemy, enemy.isBoss ? 1.05 : 1.7, 1.95);
       break;
     case "cinder-halo":
     case "sunspot":
     case "ash-comet":
-      applyEnemyBurn(enemy, enemy.isBoss ? 9 : 13, 3.2);
+      applyEnemyBurn(enemy, enemy.isBoss ? 2 : 3, 3.2);
       break;
     case "requiem-field":
       applyEnemyNecroMark(enemy);
-      enemy.slowAmount = Math.max(enemy.slowAmount, 0.18);
-      enemy.slowTimer = Math.max(enemy.slowTimer, 0.35);
+      enemy.slowAmount = Math.max(enemy.slowAmount, 0.26);
+      enemy.slowTimer = Math.max(enemy.slowTimer, 0.45);
       break;
     case "vein-burst":
     case "crimson-pool":
       applyEnemyBloodMark(enemy);
-      healPlayer(damage * 0.05);
-      enemy.slowAmount = Math.max(enemy.slowAmount, effect.kind === "crimson-pool" ? 0.22 : enemy.slowAmount);
-      enemy.slowTimer = Math.max(enemy.slowTimer, effect.kind === "crimson-pool" ? 0.32 : enemy.slowTimer);
+      healPlayer(damage * (effect.kind === "crimson-pool" ? 0.055 : 0.075));
+      enemy.slowAmount = Math.max(enemy.slowAmount, effect.kind === "crimson-pool" ? 0.28 : 0.12);
+      enemy.slowTimer = Math.max(enemy.slowTimer, effect.kind === "crimson-pool" ? 0.42 : 0.2);
       break;
     default:
       break;
   }
+}
+
+function destroyEnemyProjectile(attack) {
+  spawnHostileImpactEffect(attack.x, attack.y, attack.color);
+  attack.dead = true;
+}
+
+function windEffectIntersectsProjectile(effect, attack) {
+  if (effect.kind === "gale-ring") {
+    return circlesOverlap(effect.x, effect.y, effect.radius, attack.x, attack.y, attack.radius);
+  }
+
+  if (effect.kind === "crosswind-strip") {
+    const { currentLength, currentWidth, centerX, centerY } = getCrosswindMetrics(effect, clamp(effect.life / effect.maxLife, 0, 1));
+    return pointInRotatedRect(attack.x, attack.y, centerX, centerY, effect.angle, currentLength * 0.5, currentWidth * 0.5 + attack.radius);
+  }
+
+  if (effect.kind === "tempest-node") {
+    return circlesOverlap(effect.x, effect.y, effect.radius * 0.92, attack.x, attack.y, attack.radius);
+  }
+
+  return false;
+}
+
+function resolveWindProjectileInterception(attack) {
+  if (attack.kind !== "projectile") {
+    return false;
+  }
+
+  for (const effect of state.effects) {
+    if (effect.life <= 0) {
+      continue;
+    }
+    if (effect.kind !== "gale-ring" && effect.kind !== "crosswind-strip" && effect.kind !== "tempest-node") {
+      continue;
+    }
+    if (!windEffectIntersectsProjectile(effect, attack)) {
+      continue;
+    }
+    destroyEnemyProjectile(attack);
+    return true;
+  }
+
+  return false;
 }
 
 function pointInRotatedRect(px, py, cx, cy, angle, halfLength, halfWidth) {
@@ -4759,9 +5107,9 @@ function updateEffects(dt) {
           }
           applyZoneTick(effect, enemy, 1);
           if (effect.kind === "permafrost-seal") {
-            applyEnemyChill(enemy, enemy.isBoss ? 2.8 : 4.2, 2.4);
+            applyEnemyChill(enemy, enemy.isBoss ? 3.4 : 5, 2.6);
           } else {
-            applyEnemyBurn(enemy, enemy.isBoss ? 15 : 22, 4.2);
+            applyEnemyBurn(enemy, enemy.isBoss ? 5 : 7, 4.2);
           }
         });
         if (effect.kind === "ash-comet") {
@@ -4892,6 +5240,10 @@ function updateEnemyAttacks(dt) {
 
       if (!isInsideWorld(attack.x, attack.y, 120)) {
         attack.dead = true;
+        continue;
+      }
+
+      if (resolveWindProjectileInterception(attack)) {
         continue;
       }
 
@@ -5818,11 +6170,14 @@ function refreshPauseOverlay() {
 
   renderDevToolsPanel();
   renderPauseMeta();
-  renderUpgradesCodex();
+  if (!state.pause.devMenu || state.dev.activeTab === "skills") {
+    renderUpgradesCodex();
+  }
+  upgradesList.classList.toggle("hidden", state.pause.devMenu && state.dev.activeTab !== "skills");
   if (state.pause.devMenu) {
     menuKicker.classList.add("hidden");
     pauseTitle.textContent = "Developer Menu";
-    pauseSubtitle.textContent = "Spawn bosses, toggle Zen Mode, or click any upgrade below to add a stack. Press ~ or Esc to resume.";
+    pauseSubtitle.textContent = "Open with / on any layout. Use tabs to inspect upgrades, spawn enemies, tune the character, or switch class. Press / or Esc to resume.";
     return;
   }
 
@@ -5892,11 +6247,34 @@ function populateBossSpawnSelect() {
 function renderDevToolsPanel() {
   devToolsPanel.classList.toggle("hidden", !state.pause.devMenu);
   pauseOverlay.classList.toggle("is-dev-mode", state.pause.devMenu);
+  if (!state.pause.devMenu) {
+    return;
+  }
+
+  const tabLabels = {
+    skills: "Skills",
+    spawn: "Spawn",
+    character: "Character",
+    class: "Class",
+  };
+
   bossSpawnSelect.value = state.dev.bossChoice;
-  zenModeStatus.textContent = state.dev.zenMode ? "Zen Mode On" : "Zen Mode Off";
-  zenModeStatus.classList.toggle("is-on", state.dev.zenMode);
-  zenModeButton.textContent = state.dev.zenMode ? "Disable Zen Mode" : "Enable Zen Mode";
-  zenModeButton.classList.toggle("is-on", state.dev.zenMode);
+  devModeSummary.textContent = tabLabels[state.dev.activeTab] ?? "Skills";
+
+  for (const button of devTabButtons) {
+    const active = button.dataset.devTab === state.dev.activeTab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  }
+
+  devSkillsPanel.classList.toggle("hidden", state.dev.activeTab !== "skills");
+  devSpawnPanel.classList.toggle("hidden", state.dev.activeTab !== "spawn");
+  devCharacterPanel.classList.toggle("hidden", state.dev.activeTab !== "character");
+  devClassPanel.classList.toggle("hidden", state.dev.activeTab !== "class");
+
+  renderDevSpawnPanel();
+  renderDevCharacterPanel();
+  renderDevClassPanel();
 }
 
 function handleSpawnBossClick() {
@@ -5904,9 +6282,65 @@ function handleSpawnBossClick() {
   if (!type) {
     return;
   }
-  spawnBoss(type);
-  updateHud(true);
-  render();
+  window.debug_game?.spawnBoss(type, Number(bossSpawnCount.value));
+}
+
+function renderDevSpawnPanel() {
+  const orderedEnemyTypes = Array.from(new Set([
+    ...SPAWN_ROSTER.map((entry) => entry.type),
+    ...Object.keys(ENEMY_ARCHETYPES).filter((type) => !ENEMY_ARCHETYPES[type].isBoss),
+  ]));
+  devEnemySpawnList.innerHTML = orderedEnemyTypes.map((type) => {
+    const enemy = ENEMY_ARCHETYPES[type];
+    return [
+      `<div class="dev-spawn-row">`,
+      `<div class="dev-spawn-label"><span class="dev-spawn-emoji">${enemy.emoji ?? "\u2620\uFE0F"}</span><strong>${formatEnemyTypeLabel(type)}</strong></div>`,
+      `<input class="dev-number-input" type="number" min="1" max="999" step="1" value="1" />`,
+      `<button type="button" class="dev-button" data-enemy-type="${type}">Spawn</button>`,
+      `</div>`,
+    ].join("");
+  }).join("");
+}
+
+function renderDevCharacterPanel() {
+  devLevelInput.value = String(state.progression.level);
+  devHpInput.value = String(Math.round(state.player.hp));
+  devMaxHpInput.value = String(state.player.maxHp);
+  devDashChargesInput.value = String(state.player.dash.charges);
+  devDashMaxInput.value = String(state.player.dash.maxCharges);
+
+  toggleZenModeButton.textContent = state.dev.zenMode ? "Disable Zen Mode" : "Enable Zen Mode";
+  toggleZenModeButton.classList.toggle("is-on", state.dev.zenMode);
+  toggleInvulnerableButton.textContent = state.dev.playerInvulnerable ? "Disable Invulnerability" : "Enable Invulnerability";
+  toggleInvulnerableButton.classList.toggle("is-on", state.dev.playerInvulnerable);
+  toggleManualSkillsButton.textContent = state.dev.manualSkillMode ? "Disable Manual Skills" : "Enable Manual Skills";
+  toggleManualSkillsButton.classList.toggle("is-on", state.dev.manualSkillMode);
+  toggleZeroCooldownButton.textContent = state.dev.zeroSkillCooldown ? "Disable Zero Cooldown" : "Enable Zero Cooldown";
+  toggleZeroCooldownButton.classList.toggle("is-on", state.dev.zeroSkillCooldown);
+
+  devSkillToggleList.innerHTML = getClassDef().skills.map((skill) => {
+    const skillState = state.player.skills.find((entry) => entry.id === skill.id);
+    const enabled = Boolean(skillState?.unlocked);
+    return [
+      `<div class="dev-skill-toggle-row">`,
+      `<div class="dev-skill-toggle-copy"><span>${skill.icon}</span><strong>${skill.title}</strong><small>Slot ${skill.slot} - Mastery ${skillState?.mastery ?? 0}/2</small></div>`,
+      `<button type="button" class="dev-button ${enabled ? "dev-button-accent is-on" : ""}" data-skill-id="${skill.id}" data-skill-enabled="${enabled}">${enabled ? "Enabled" : "Disabled"}</button>`,
+      `</div>`,
+    ].join("");
+  }).join("");
+}
+
+function renderDevClassPanel() {
+  devClassButtons.innerHTML = CLASS_ORDER.map((classId) => {
+    const classDef = CLASS_DEFS[classId];
+    const active = state.player.classId === classId;
+    return [
+      `<button type="button" class="dev-class-button ${active ? "is-active" : ""}" data-class-id="${classId}">`,
+      `<span class="dev-class-icon">${classDef.icon}</span>`,
+      `<span class="dev-class-copy"><strong>${classDef.title}</strong><small>${classDef.passiveLabel}</small></span>`,
+      `</button>`,
+    ].join("");
+  }).join("");
 }
 
 function onClassCardClick(event) {
@@ -6058,6 +6492,9 @@ function renderPauseMeta() {
 
   if (state.dev.zenMode) {
     items.push({ label: "Zen", value: "Immortal" });
+  }
+  if (state.dev.playerInvulnerable && !state.dev.zenMode) {
+    items.push({ label: "Guard", value: "Invulnerable" });
   }
 
   pauseMeta.innerHTML = items
@@ -6249,3 +6686,6 @@ function renderUpgradesCodex() {
   }
 }
 
+    if (enemy.freezeResistTimer <= 0) {
+      enemy.freezeResist = Math.max(0, enemy.freezeResist - dt * 0.24);
+    }

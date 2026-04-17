@@ -66,7 +66,14 @@ window.render_game_to_text = function renderGameToText() {
       dashRechargeTime: Number(state.player.dash.rechargeTime.toFixed(2)),
       dashRechargeTimer: Number(state.player.dash.rechargeTimer.toFixed(2)),
       dashDistance: Number(state.player.dash.distance.toFixed(1)),
+      moveSpeed: Number((state.player.speed * state.player.speedMultiplier).toFixed(1)),
       isDashing: state.player.dash.activeTimer > 0,
+      damageReduction: Number(state.player.damageReduction.toFixed(3)),
+      bloodRiteActive: state.player.bloodRiteTimer > 0,
+      necroSiphonActive: Boolean(state.player.necroSiphonActive),
+      windRushActive: state.player.windRushTimer > 0,
+      lastCritActive: state.player.lastCritTimer > 0,
+      lastCritSource: state.player.lastCritSource ?? null,
       unlockedSkills: getUnlockedSkillStates().map((skill) => ({
         id: skill.id,
         slot: skill.slot,
@@ -132,11 +139,13 @@ window.render_game_to_text = function renderGameToText() {
         chill: enemy.chillStacks > 0,
         freeze: enemy.freezeTimer > 0,
         brittle: enemy.brittleTimer > 0,
-        burn: enemy.burnTimer > 0,
+        burn: enemy.burnStacks > 0,
         necro: enemy.necroMarkTimer > 0,
         blood: enemy.bloodMarkTimer > 0,
         haste: enemy.hasteTimer > 0,
       },
+      burnStacks: enemy.burnStacks ?? 0,
+      freezeResist: Number((enemy.freezeResist ?? 0).toFixed(3)),
     })),
     projectilesOnField: state.projectiles.length,
     alliesOnField: state.allies.length,
@@ -177,12 +186,14 @@ window.render_game_to_text = function renderGameToText() {
     } : null,
     fps: state.performance.fpsDisplay,
     dev: {
+      activeTab: state.dev.activeTab,
       zenMode: state.dev.zenMode,
       devMenuOpen: state.pause.devMenu,
       bossChoice: state.dev.bossChoice,
       disableSpawns: state.dev.disableSpawns,
       manualSkillMode: state.dev.manualSkillMode,
       zeroSkillCooldown: state.dev.zeroSkillCooldown,
+      playerInvulnerable: state.dev.playerInvulnerable,
     },
     touch: {
       enabled: touchInput.enabled,
@@ -206,8 +217,22 @@ window.advanceTime = function advanceTime(ms) {
 };
 
 window.debug_game = {
-  spawnBoss(type) {
-    spawnBoss(type);
+  spawnBoss(type, count = 1) {
+    const spawnType = type === "random" ? chooseRandomBossType() : type;
+    if (!spawnType || !ENEMY_ARCHETYPES[spawnType]?.isBoss) {
+      return;
+    }
+    const anchor = pickSpawnPoint(Math.max(520, Math.min(viewWidth, viewHeight) * 0.58));
+    for (let i = 0; i < Math.max(1, Math.floor(count)); i += 1) {
+      const boss = createEnemy(spawnType, anchor, i, Math.max(1, Math.floor(count)), {
+        bossEncounterIndex: state.bossDirector.encounterIndex,
+      });
+      boss.attackCooldown = 1.4;
+      state.bossSeen[spawnType] = true;
+      state.lastBossType = spawnType;
+      state.enemies.push(boss);
+      spawnBossIntroEffect(boss);
+    }
     render();
   },
   damageBoss(amount) {
@@ -243,6 +268,35 @@ window.debug_game = {
     }
     render();
   },
+  grantAllMinorUpgrades() {
+    for (const upgrade of MINOR_UPGRADES) {
+      while (applyUpgradeById(upgrade.id)) {
+        // Max out each minor stack.
+      }
+    }
+    render();
+  },
+  grantAllMajorUpgrades() {
+    for (const upgrade of MAJOR_UPGRADE_PAIRS.flatMap((pair) => [pair.left, pair.right])) {
+      while (applyUpgradeById(upgrade.id)) {
+        // Max out each major branch for debug scenarios.
+      }
+    }
+    render();
+  },
+  grantAllUpgrades() {
+    window.debug_game.grantAllMinorUpgrades();
+    window.debug_game.grantAllMajorUpgrades();
+    for (const skill of getClassDef().skills) {
+      while (applyUpgradeById(skill.id)) {
+        // Unlock and max all class skills.
+      }
+    }
+    for (const blessing of BOSS_BLESSING_LIBRARY) {
+      applyUpgradeById(blessing.id);
+    }
+    render();
+  },
   hitPlayer(amount) {
     damagePlayer(amount, {
       key: "debug:manual-hit",
@@ -272,6 +326,57 @@ window.debug_game = {
     state.enemies = [];
     state.enemyAttacks = [];
     render();
+  },
+  setPlayerLevel(level) {
+    const nextLevel = Math.max(1, Math.floor(level || 1));
+    state.progression.level = nextLevel;
+    state.progression.xp = 0;
+    state.progression.xpToNext = getXpToNext(nextLevel);
+    state.progression.pendingLevelUps = 0;
+    state.progression.rewardQueue = [];
+    state.levelUp.active = false;
+    levelUpOverlay.classList.add("hidden");
+    updateHud(true);
+    refreshPauseOverlay();
+    render();
+  },
+  setPlayerHp(value) {
+    state.player.hp = clamp(value, 0, state.player.maxHp);
+    updateHud(true);
+    refreshPauseOverlay();
+    render();
+  },
+  setPlayerMaxHp(value) {
+    state.player.maxHp = Math.max(1, Math.floor(value || 1));
+    state.player.hp = Math.min(state.player.hp, state.player.maxHp);
+    updateHud(true);
+    refreshPauseOverlay();
+    render();
+  },
+  setDashCharges(current, max = current) {
+    state.player.dash.maxCharges = Math.max(0, Math.floor(max || 0));
+    state.player.dash.charges = clamp(Math.floor(current || 0), 0, state.player.dash.maxCharges);
+    updateHud(true);
+    refreshPauseOverlay();
+    render();
+  },
+  setPlayerInvulnerable(enabled) {
+    state.dev.playerInvulnerable = Boolean(enabled);
+    refreshPauseOverlay();
+    render();
+  },
+  setSkillEnabled(skillId, enabled) {
+    const skillState = state.player.skills.find((skill) => skill.id === skillId);
+    if (!skillState) {
+      return false;
+    }
+    skillState.unlocked = Boolean(enabled);
+    skillState.timer = enabled ? 0 : getSkillCooldown(skillState);
+    skillState.castFlashTimer = 0;
+    updateHud(true);
+    refreshPauseOverlay();
+    render();
+    return true;
   },
   triggerSkill(skillRef) {
     const skillState = typeof skillRef === "number"
@@ -393,6 +498,7 @@ window.debug_game = {
       }
       updateHud(true);
     }
+    refreshPauseOverlay();
     render();
   },
   setSkillLabZeroCooldown(enabled) {
@@ -403,6 +509,7 @@ window.debug_game = {
       }
     }
     updateHud(true);
+    refreshPauseOverlay();
     render();
   },
   gainLevel(amount = 1) {

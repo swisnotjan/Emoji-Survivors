@@ -1732,6 +1732,72 @@ body {
   margin-bottom: 10px;
 }
 
+.dev-tab-nav {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.dev-tab-button {
+  border: 1px solid rgba(236, 212, 146, 0.16);
+  border-radius: 10px;
+  background: rgba(18, 24, 20, 0.72);
+  color: #dbe8d9;
+  padding: 10px 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.dev-tab-button:hover,
+.dev-tab-button.is-active {
+  border-color: rgba(255, 201, 134, 0.34);
+  box-shadow: 0 0 18px rgba(255, 151, 111, 0.12);
+  transform: translateY(-1px);
+}
+
+.dev-tab-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.dev-panel-copy {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #cad8ca;
+}
+
+.dev-bulk-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dev-panel-section {
+  display: grid;
+  gap: 10px;
+}
+
+.dev-section-head {
+  display: grid;
+  gap: 4px;
+}
+
+.dev-section-head strong {
+  color: #f8e2a8;
+  font-size: 15px;
+}
+
+.dev-section-head span {
+  font-size: 12px;
+  color: #bfd0c7;
+}
+
 .dev-chip {
   display: inline-flex;
   align-items: center;
@@ -1759,6 +1825,10 @@ body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   align-items: stretch;
+}
+
+.dev-controls-grid-character {
+  align-items: start;
 }
 
 .dev-card {
@@ -1800,11 +1870,27 @@ body {
   font: inherit;
 }
 
+.dev-number-input {
+  width: 100%;
+  border: 1px solid rgba(239, 226, 173, 0.18);
+  border-radius: 10px;
+  background: rgba(12, 18, 15, 0.92);
+  color: #f5f9ee;
+  padding: 10px 12px;
+  font: inherit;
+  font-weight: 700;
+}
+
 .dev-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.dev-actions-column {
+  display: grid;
+  grid-template-columns: 1fr;
 }
 
 .dev-button {
@@ -1845,6 +1931,92 @@ button.upgrade-row:active {
   border-color: rgba(142, 244, 195, 0.44);
   box-shadow: 0 0 22px rgba(105, 224, 169, 0.18);
   color: #bdf5d0;
+}
+
+.dev-button.is-on {
+  border-color: rgba(255, 216, 145, 0.34);
+  box-shadow: 0 0 18px rgba(255, 194, 113, 0.14);
+}
+
+.dev-spawn-list,
+.dev-skill-toggle-list,
+.dev-class-button-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.dev-spawn-row,
+.dev-skill-toggle-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px 108px;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(236, 222, 175, 0.14);
+  background: rgba(16, 21, 18, 0.78);
+}
+
+.dev-spawn-label,
+.dev-skill-toggle-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dev-spawn-label strong,
+.dev-skill-toggle-copy strong {
+  color: #f5f8ef;
+}
+
+.dev-spawn-emoji {
+  font-size: 22px;
+}
+
+.dev-skill-toggle-copy small {
+  color: #b9c8be;
+  font-size: 11px;
+}
+
+.dev-class-button-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dev-class-button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(240, 219, 160, 0.16);
+  border-radius: 12px;
+  background: rgba(18, 24, 20, 0.76);
+  color: #eef8e6;
+  padding: 12px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.dev-class-button:hover,
+.dev-class-button.is-active {
+  border-color: rgba(255, 196, 129, 0.36);
+  box-shadow: 0 0 22px rgba(255, 154, 108, 0.12);
+  transform: translateY(-1px);
+}
+
+.dev-class-icon {
+  font-size: 28px;
+}
+
+.dev-class-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.dev-class-copy small {
+  color: #bfd0c7;
+  font-size: 11px;
 }
 
 .skill-lab-panel {
@@ -2541,6 +2713,17 @@ button.upgrade-row {
   }
 
   .dev-controls-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dev-tab-nav,
+  .dev-bulk-actions,
+  .dev-class-button-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dev-spawn-row,
+  .dev-skill-toggle-row {
     grid-template-columns: 1fr;
   }
 
