@@ -59,7 +59,7 @@
             <div id="dashHud" class="dash-hud">
               <div class="dash-head">
                 <span class="label">Dash</span>
-                <span class="dash-hotkey">Space</span>
+                <span class="dash-hotkey">Space / Shift</span>
               </div>
               <div id="dashCharges" class="dash-charges">
                 <div class="dash-charge"><div class="dash-charge-fill"></div></div>
@@ -182,27 +182,127 @@
           <div id="devToolsPanel" class="dev-tools hidden">
             <div class="dev-tools-head">
               <span class="dev-chip">Dev</span>
-              <span id="zenModeStatus" class="dev-chip dev-chip-zen">Zen Mode Off</span>
+              <span id="devModeSummary" class="dev-chip">Skills</span>
             </div>
-            <div class="dev-controls-grid">
-              <div class="dev-card">
-                <label class="dev-control">
-                  <span>Spawn Boss</span>
-                  <select id="bossSpawnSelect"></select>
-                </label>
-                <div class="dev-actions">
-                  <button id="spawnBossButton" class="dev-button" type="button">Spawn Boss</button>
+            <div id="devTabNav" class="dev-tab-nav" role="tablist" aria-label="Developer menu sections">
+              <button type="button" class="dev-tab-button is-active" data-dev-tab="skills">Skills</button>
+              <button type="button" class="dev-tab-button" data-dev-tab="spawn">Spawn</button>
+              <button type="button" class="dev-tab-button" data-dev-tab="character">Character</button>
+              <button type="button" class="dev-tab-button" data-dev-tab="class">Class</button>
+            </div>
+
+            <div id="devSkillsPanel" class="dev-tab-panel">
+              <p class="dev-panel-copy">Inspect the full codex, click rows to add stacks, or max out upgrade groups in one action.</p>
+              <div class="dev-bulk-actions">
+                <button id="grantAllUpgradesButton" class="dev-button dev-button-accent" type="button">All Upgrades</button>
+                <button id="grantAllMinorButton" class="dev-button" type="button">All Minor</button>
+                <button id="grantAllMajorButton" class="dev-button" type="button">All Major</button>
+              </div>
+            </div>
+
+            <div id="devSpawnPanel" class="dev-tab-panel hidden">
+              <div class="dev-panel-section">
+                <div class="dev-section-head">
+                  <strong>Enemies</strong>
+                  <span>Spawn any non-boss enemy with an exact amount.</span>
+                </div>
+                <div id="devEnemySpawnList" class="dev-spawn-list"></div>
+              </div>
+
+              <div class="dev-controls-grid">
+                <div class="dev-card">
+                  <label class="dev-control">
+                    <span>Boss</span>
+                    <select id="bossSpawnSelect"></select>
+                  </label>
+                  <label class="dev-control">
+                    <span>Count</span>
+                    <input id="bossSpawnCount" class="dev-number-input" type="number" min="1" max="20" step="1" value="1" />
+                  </label>
+                  <div class="dev-actions">
+                    <button id="spawnBossButton" class="dev-button" type="button">Spawn Boss</button>
+                  </div>
+                </div>
+
+                <div class="dev-card">
+                  <div class="dev-control">
+                    <span>Arena</span>
+                    <strong class="dev-card-status">Clear the current wave and boss attacks without restarting the run.</strong>
+                  </div>
+                  <div class="dev-actions">
+                    <button id="clearEnemiesButton" class="dev-button" type="button">Clear Arena</button>
+                  </div>
                 </div>
               </div>
-              <div class="dev-card dev-card-zen">
-                <div class="dev-control">
-                  <span>Zen Mode</span>
-                  <strong class="dev-card-status">Auto levels, immortal HP, infinite dashes.</strong>
+            </div>
+
+            <div id="devCharacterPanel" class="dev-tab-panel hidden">
+              <div class="dev-controls-grid dev-controls-grid-character">
+                <div class="dev-card">
+                  <label class="dev-control">
+                    <span>Level</span>
+                    <input id="devLevelInput" class="dev-number-input" type="number" min="1" max="999" step="1" value="1" />
+                  </label>
+                  <div class="dev-actions">
+                    <button id="setLevelButton" class="dev-button" type="button">Set Level</button>
+                    <button id="gainLevelButton" class="dev-button" type="button">+1 Level</button>
+                  </div>
                 </div>
-                <div class="dev-actions">
-                  <button id="zenModeButton" class="dev-button dev-button-accent" type="button">Enable Zen Mode</button>
+
+                <div class="dev-card">
+                  <label class="dev-control">
+                    <span>Current HP</span>
+                    <input id="devHpInput" class="dev-number-input" type="number" min="1" max="99999" step="1" value="100" />
+                  </label>
+                  <label class="dev-control">
+                    <span>Max HP</span>
+                    <input id="devMaxHpInput" class="dev-number-input" type="number" min="1" max="99999" step="1" value="100" />
+                  </label>
+                  <div class="dev-actions">
+                    <button id="setHpButton" class="dev-button" type="button">Apply HP</button>
+                  </div>
+                </div>
+
+                <div class="dev-card">
+                  <label class="dev-control">
+                    <span>Dash Charges</span>
+                    <input id="devDashChargesInput" class="dev-number-input" type="number" min="0" max="99" step="1" value="1" />
+                  </label>
+                  <label class="dev-control">
+                    <span>Dash Max</span>
+                    <input id="devDashMaxInput" class="dev-number-input" type="number" min="0" max="99" step="1" value="1" />
+                  </label>
+                  <div class="dev-actions">
+                    <button id="setDashButton" class="dev-button" type="button">Apply Dashes</button>
+                  </div>
+                </div>
+
+                <div class="dev-card">
+                  <div class="dev-control">
+                    <span>Debug Toggles</span>
+                    <strong class="dev-card-status">Freeze damage, force manual casting, or zero out skill cooldowns.</strong>
+                  </div>
+                  <div class="dev-actions dev-actions-column">
+                    <button id="toggleZenModeButton" class="dev-button dev-button-accent" type="button">Zen Mode</button>
+                    <button id="toggleInvulnerableButton" class="dev-button" type="button">Invulnerability</button>
+                    <button id="toggleManualSkillsButton" class="dev-button" type="button">Manual Skills</button>
+                    <button id="toggleZeroCooldownButton" class="dev-button" type="button">Zero Cooldown</button>
+                  </div>
                 </div>
               </div>
+
+              <div class="dev-panel-section">
+                <div class="dev-section-head">
+                  <strong>Skill Toggles</strong>
+                  <span>Enable or disable any class skill without changing the rest of the build.</span>
+                </div>
+                <div id="devSkillToggleList" class="dev-skill-toggle-list"></div>
+              </div>
+            </div>
+
+            <div id="devClassPanel" class="dev-tab-panel hidden">
+              <p class="dev-panel-copy">Switching class restarts the current run with the selected class so combat state stays consistent.</p>
+              <div id="devClassButtons" class="dev-class-button-grid"></div>
             </div>
           </div>
           <div id="upgradesList" class="upgrades-list"></div>

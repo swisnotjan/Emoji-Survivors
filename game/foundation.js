@@ -912,7 +912,7 @@ const STATUS_PRIORITY = {
 function getEnemyPrimaryStatus(enemy) {
   const statusVisuals = [
     { key: "freeze", value: Math.max(enemy.freezeTimer, enemy.statusFlash.freeze), hue: 190, aura: "rgba(122, 212, 255, {a})" },
-    { key: "burn", value: Math.max(enemy.burnTimer * 0.25, enemy.statusFlash.burn), hue: 18, aura: "rgba(255, 154, 68, {a})" },
+    { key: "burn", value: Math.max((enemy.burnStacks ?? 0) * 0.14, enemy.statusFlash.burn), hue: 18, aura: "rgba(255, 154, 68, {a})" },
     { key: "chill", value: Math.max(enemy.slowTimer * 0.3, enemy.statusFlash.chill), hue: 180, aura: "rgba(102, 196, 255, {a})" },
     { key: "necro", value: Math.max(enemy.necroMarkTimer, enemy.statusFlash.necro), hue: 255, aura: "rgba(196, 142, 255, {a})" },
     { key: "blood", value: Math.max(enemy.bloodMarkTimer, enemy.statusFlash.blood), hue: 334, aura: "rgba(255, 96, 138, {a})" },
@@ -936,15 +936,15 @@ const CLASS_DEFS = {
     playerEmoji: "\uD83E\uDDDD\uD83C\uDFFB\u200D\u2642\uFE0F",
     title: "Wind Mage",
     adjective: "Wind",
-    description: "Fast control mage that wins by clearing space and shoving packs apart.",
+    description: "Fast mobility-control mage that reroutes pressure, opens escape paths, and survives by movement more than damage.",
     color: "#e8f5ff",
     projectileColor: "#d7f6ff",
     projectileRgb: "215, 246, 255",
-    autoDamage: 22,
-    speedMultiplier: 1.12,
-    maxHpMultiplier: 1,
+    autoDamage: 18,
+    speedMultiplier: 1.22,
+    maxHpMultiplier: 0.98,
     passiveLabel: "Slipstream Force",
-    passiveText: "Auto attacks always knock harder, and movement speed is increased by 12%.",
+    passiveText: "Auto attacks strongly displace enemies. Wind skills disperse hostile projectiles and trigger short slipstream speed bursts.",
     passiveType: "wind",
     skillUnlocks: [5, 15, 25],
     unlockMessage: "Learned a new wind technique.",
@@ -960,15 +960,15 @@ const CLASS_DEFS = {
     playerEmoji: "\uD83E\uDDD9\uD83C\uDFFB\u200D\u2642\uFE0F",
     title: "Frost Mage",
     adjective: "Frost",
-    description: "Control mage that stacks chill into short freezes and brittle burst windows.",
+    description: "Crit-control mage that stacks Chill, creates Brittle windows, and cashes them out with precise execution hits.",
     color: "#8ed8ff",
     projectileColor: "#9fe2ff",
     projectileRgb: "159, 226, 255",
-    autoDamage: 24,
+    autoDamage: 23,
     speedMultiplier: 1,
     maxHpMultiplier: 1,
     passiveLabel: "Cold Equation",
-    passiveText: "Auto attacks apply Chill. Repeated hits freeze targets briefly and leave them Brittle.",
+    passiveText: "Auto attacks stack Chill aggressively. Controlled enemies become vulnerable to critical hits, and Brittle targets are clean execution windows.",
     passiveType: "frost",
     skillUnlocks: [5, 15, 25],
     unlockMessage: "Learned a new frost technique.",
@@ -984,15 +984,15 @@ const CLASS_DEFS = {
     playerEmoji: "\uD83E\uDEC5\uD83C\uDFFB",
     title: "Fire Mage",
     adjective: "Fire",
-    description: "Area-denial mage that burns crowds down and turns chokepoints into kill zones.",
+    description: "AoE damage mage that stacks Burn quickly and incinerates clustered enemies faster than any other class.",
     color: "#ffb25e",
     projectileColor: "#ffc16b",
     projectileRgb: "255, 193, 107",
-    autoDamage: 22,
+    autoDamage: 23,
     speedMultiplier: 1,
-    maxHpMultiplier: 1,
+    maxHpMultiplier: 0.96,
     passiveLabel: "Kindling",
-    passiveText: "Auto attacks apply Burn. Burning deaths splash embers into nearby enemies.",
+    passiveText: "Auto attacks add Burn stacks. Fire zones build stacks quickly, and burning deaths spread the blaze.",
     passiveType: "fire",
     skillUnlocks: [5, 15, 25],
     unlockMessage: "Learned a new fire technique.",
@@ -1008,15 +1008,15 @@ const CLASS_DEFS = {
     playerEmoji: "\uD83E\uDDDD\uD83C\uDFFF",
     title: "Necromancer",
     adjective: "Necrotic",
-    description: "Durable attrition mage whose attacks pierce and whose thralls keep the frontline alive.",
+    description: "Fragile summoner that owns space through swarm uptime, piercing marks, and a much denser procession of green summons.",
     color: "#7de0b5",
     projectileColor: "#8cf0c3",
     projectileRgb: "140, 240, 195",
-    autoDamage: 20,
-    speedMultiplier: 0.94,
-    maxHpMultiplier: 1.32,
+    autoDamage: 15,
+    speedMultiplier: 1,
+    maxHpMultiplier: 0.78,
     passiveLabel: "Black Procession",
-    passiveText: "Auto attacks pierce. Kills can raise Thralls, and Thrall hits heal you slightly.",
+    passiveText: "Auto attacks pierce and mark enemies. Marked kills and necrotic skills call additional Thralls, and your summon cap is increased.",
     passiveType: "necro",
     skillUnlocks: [5, 15, 25],
     unlockMessage: "Learned a new necrotic rite.",
@@ -1032,21 +1032,21 @@ const CLASS_DEFS = {
     playerEmoji: "\uD83E\uDDDB\uD83C\uDFFB",
     title: "Blood Mage",
     adjective: "Blood",
-    description: "High-risk duelist that sustains through damage, crits hard, and spikes after dashing.",
+    description: "Blood bruiser that holds ground, drains life in close combat, and turns commitment into durability instead of crit spikes.",
     color: "#ff6a88",
     projectileColor: "#ff7b98",
     projectileRgb: "255, 123, 152",
-    autoDamage: 26,
-    speedMultiplier: 1.08,
-    maxHpMultiplier: 0.74,
+    autoDamage: 23,
+    speedMultiplier: 0.95,
+    maxHpMultiplier: 1.42,
     passiveLabel: "Hemomancy",
-    passiveText: "Auto attacks lifesteal, can crit, and gain a short offensive buff after dashing.",
+    passiveText: "Auto attacks drain life. Blood-marked enemies feed your sustain, and blood magic hardens you while you hold your ground.",
     passiveType: "blood",
     skillUnlocks: [5, 15, 25],
     unlockMessage: "Learned a new blood rite.",
     skills: [
       { id: "vein-burst", title: "Vein Burst", icon: "\ud83d\udca5", slot: 1, cooldown: 7.1, role: "Panic", targeting: "self" },
-      { id: "crimson-pool", title: "Crimson Pool", icon: "\ud83e\ude78", slot: 2, cooldown: 11.4, role: "Zone", targeting: "cluster" },
+      { id: "crimson-pool", title: "Crimson Pool", icon: "\ud83e\ude78", slot: 2, cooldown: 11.4, role: "Zone", targeting: "self" },
       { id: "blood-rite", title: "Blood Rite", icon: "\ud83e\uddea", slot: 3, cooldown: 15.2, role: "Signature", targeting: "self" },
     ],
   },
@@ -1061,12 +1061,12 @@ const SKILL_SUMMARIES = {
   "cinder-halo": "Ignites a close halo around the caster that repeatedly burns anything trying to collapse on you.",
   "sunspot": "Plants a bright fire zone under the thickest cluster and cooks it over time.",
   "ash-comet": "Calls down a delayed comet strike that detonates into a large fire burst.",
-  "bone-ward": "Spins bone wards around the necromancer to grind nearby enemies and hold the line.",
-  "requiem-field": "Spreads a necrotic field that weakens enemies and feeds your corpse economy.",
-  "grave-call": "Raises fresh thralls from nearby corpses, or conjures a temporary one if none are ready.",
-  "vein-burst": "Detonates a blood burst around the caster for close-range sustain and emergency damage.",
-  "crimson-pool": "Drops a blood pool under a cluster to slow, drain, and fuel your sustain.",
-  "blood-rite": "Enters a short ritual frenzy that amplifies blood offense and dash follow-up pressure.",
+  "bone-ward": "Calls a shell of green skull wards that screen the necromancer and seed extra summons into the fight.",
+  "requiem-field": "Plants a necrotic command zone that slows enemies and empowers summons fighting inside it.",
+  "grave-call": "Pulls corpses into a fresh wave of Thralls and still conjures multiple phantom skulls if no corpses are ready.",
+  "vein-burst": "Slams a close blood burst around the caster and briefly hardens you for brawling in the pack.",
+  "crimson-pool": "Creates a hold-ground blood pool under your feet that slows enemies and amplifies your sustain.",
+  "blood-rite": "Enters a blood fortress stance that greatly boosts short-range sustain and damage reduction.",
 };
 const HOSTILE_ARCANE_COLOR = "rgba(168, 116, 255, {a})";
 const ENEMY_PROJECTILE_COLOR = HOSTILE_ARCANE_COLOR;
@@ -2177,10 +2177,36 @@ const closeUpgradesButton = document.getElementById("closeUpgradesButton");
 const pauseRestartButton = document.getElementById("pauseRestartButton");
 const pausePanel = pauseOverlay.querySelector(".pause-panel");
 const devToolsPanel = document.getElementById("devToolsPanel");
+const devModeSummary = document.getElementById("devModeSummary");
+const devTabNav = document.getElementById("devTabNav");
+const devTabButtons = Array.from(devTabNav?.querySelectorAll("[data-dev-tab]") ?? []);
+const devSkillsPanel = document.getElementById("devSkillsPanel");
+const devSpawnPanel = document.getElementById("devSpawnPanel");
+const devCharacterPanel = document.getElementById("devCharacterPanel");
+const devClassPanel = document.getElementById("devClassPanel");
+const grantAllUpgradesButton = document.getElementById("grantAllUpgradesButton");
+const grantAllMinorButton = document.getElementById("grantAllMinorButton");
+const grantAllMajorButton = document.getElementById("grantAllMajorButton");
+const devEnemySpawnList = document.getElementById("devEnemySpawnList");
 const bossSpawnSelect = document.getElementById("bossSpawnSelect");
+const bossSpawnCount = document.getElementById("bossSpawnCount");
 const spawnBossButton = document.getElementById("spawnBossButton");
-const zenModeButton = document.getElementById("zenModeButton");
-const zenModeStatus = document.getElementById("zenModeStatus");
+const clearEnemiesButton = document.getElementById("clearEnemiesButton");
+const devLevelInput = document.getElementById("devLevelInput");
+const setLevelButton = document.getElementById("setLevelButton");
+const gainLevelButton = document.getElementById("gainLevelButton");
+const devHpInput = document.getElementById("devHpInput");
+const devMaxHpInput = document.getElementById("devMaxHpInput");
+const setHpButton = document.getElementById("setHpButton");
+const devDashChargesInput = document.getElementById("devDashChargesInput");
+const devDashMaxInput = document.getElementById("devDashMaxInput");
+const setDashButton = document.getElementById("setDashButton");
+const toggleZenModeButton = document.getElementById("toggleZenModeButton");
+const toggleInvulnerableButton = document.getElementById("toggleInvulnerableButton");
+const toggleManualSkillsButton = document.getElementById("toggleManualSkillsButton");
+const toggleZeroCooldownButton = document.getElementById("toggleZeroCooldownButton");
+const devSkillToggleList = document.getElementById("devSkillToggleList");
+const devClassButtons = document.getElementById("devClassButtons");
 
 const gameOverOverlay = document.getElementById("gameOverOverlay");
 const resultValue = document.getElementById("resultValue");
