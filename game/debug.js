@@ -174,6 +174,27 @@ window.render_game_to_text = function renderGameToText() {
       targetClassId: metaProgress.unlockState.targetClassId,
       targetXp: metaProgress.unlockState.xp,
       targetKills: metaProgress.unlockState.kills,
+      archiveChallenges: { ...(metaProgress.archive?.challenges ?? {}) },
+      archiveAchievements: { ...(metaProgress.archive?.achievements ?? {}) },
+    },
+    archiveRun: {
+      completedChallenges: state.archiveRun.completedChallenges.slice(),
+      completedAchievements: state.archiveRun.completedAchievements.slice(),
+      revealEntries: state.archiveRun.revealEntries.slice(),
+      toastCurrent: state.archiveRun.toastCurrent ? { ...state.archiveRun.toastCurrent } : null,
+      toastQueueLength: state.archiveRun.toastQueue.length,
+      bossCount: state.archiveRun.bossCount,
+      skillUnlocks: state.archiveRun.skillUnlocks,
+      masteryChoices: state.archiveRun.masteryChoices,
+      majorChoices: state.archiveRun.majorChoices,
+      blessingChoices: state.archiveRun.blessingChoices,
+      totalHealing: Number(state.archiveRun.totalHealing.toFixed(1)),
+      timeLowHp: Number(state.archiveRun.timeLowHp.toFixed(1)),
+      burnKillCount: state.archiveRun.burnKillCount,
+      maxBurnKillStreak: state.archiveRun.maxBurnKillStreak,
+      afflictedKills: state.archiveRun.afflictedKills,
+      thrallsSpawned: state.archiveRun.thrallsSpawned,
+      maxThralls: state.archiveRun.maxThralls,
     },
     telemetry: state.telemetry ? {
       levelTimings: { ...state.telemetry.levelTimings },
@@ -187,6 +208,7 @@ window.render_game_to_text = function renderGameToText() {
     fps: state.performance.fpsDisplay,
     dev: {
       activeTab: state.dev.activeTab,
+      codexTab: state.pause.codexTab,
       zenMode: state.dev.zenMode,
       devMenuOpen: state.pause.devMenu,
       bossChoice: state.dev.bossChoice,
@@ -231,6 +253,7 @@ window.debug_game = {
       state.bossSeen[spawnType] = true;
       state.lastBossType = spawnType;
       state.enemies.push(boss);
+      trackArchiveEvent("boss_spawned", { bossType: spawnType });
       spawnBossIntroEffect(boss);
     }
     render();
@@ -417,6 +440,15 @@ window.debug_game = {
   clearTelemetryHistory() {
     telemetryStore = createDefaultTelemetryStore();
     saveTelemetryStore();
+    render();
+  },
+  clearArchiveProgress() {
+    metaProgress.archive = {
+      challenges: {},
+      achievements: {},
+    };
+    saveMetaProgress();
+    renderStartOverlay();
     render();
   },
   getNearbyFeatures(radius = 1400) {

@@ -9,6 +9,7 @@
     "serve": "node scripts/serve-static.mjs",
     "playtest:smoke": "node scripts/run-playtest.mjs --page index.html --scenario smoke",
     "playtest:skilllab": "node scripts/run-playtest.mjs --page skill-lab.html --scenario skilllab",
+    "verify:archive": "node scripts/verify/verify-archive-challenges.mjs",
     "verify:bosses": "node scripts/verify/verify-boss-random-balance.mjs",
     "verify:majors": "node scripts/verify/verify-major-scaling.mjs",
     "verify:telemetry": "node scripts/verify/verify-telemetry-balance.mjs",

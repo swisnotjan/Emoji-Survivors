@@ -893,6 +893,10 @@ const BOSS_BLESSING_LIBRARY = Object.entries(BOSS_REWARD_POOLS).flatMap(([bossTy
 
 const META_STORAGE_KEY = "emoji-survivors-meta-v2";
 const CLASS_ORDER = ["wind", "frost", "fire", "necro", "blood"];
+const ARCHIVE_CHALLENGES = [...(GAME_CONFIG.archiveChallenges ?? [])].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.id.localeCompare(b.id));
+const ARCHIVE_ACHIEVEMENTS = [...(GAME_CONFIG.archiveAchievements ?? [])].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.id.localeCompare(b.id));
+const ARCHIVE_CHALLENGE_MAP = new Map(ARCHIVE_CHALLENGES.map((entry) => [entry.id, entry]));
+const ARCHIVE_ACHIEVEMENT_MAP = new Map(ARCHIVE_ACHIEVEMENTS.map((entry) => [entry.id, entry]));
 const CLASS_UNLOCK_REQUIREMENTS = GAME_CONFIG.classUnlockRequirements ?? {
   wind: { xp: 0, enemyType: null, enemyKills: 0 },
   frost: { xp: 1500, enemyType: "runner", enemyKills: 70 },
@@ -1021,9 +1025,9 @@ const CLASS_DEFS = {
     skillUnlocks: [5, 15, 25],
     unlockMessage: "Learned a new necrotic rite.",
     skills: [
-      { id: "bone-ward", title: "Bone Ward", icon: "\ud83e\uddb4", slot: 1, cooldown: 8.2, role: "Panic", targeting: "self" },
-      { id: "requiem-field", title: "Requiem Field", icon: "\ud83e\udea6", slot: 2, cooldown: 12.2, role: "Zone", targeting: "cluster" },
-      { id: "grave-call", title: "Grave Call", icon: "\u26b0\ufe0f", slot: 3, cooldown: 16.4, role: "Signature", targeting: "cluster" },
+      { id: "bone-ward", title: "Bone Ward", icon: "\ud83e\uddb4", slot: 1, cooldown: 7.6, role: "Panic", targeting: "self" },
+      { id: "requiem-field", title: "Requiem Field", icon: "\ud83e\udea6", slot: 2, cooldown: 10.8, role: "Zone", targeting: "cluster" },
+      { id: "grave-call", title: "Grave Call", icon: "\u26b0\ufe0f", slot: 3, cooldown: 14.2, role: "Signature", targeting: "self" },
     ],
   },
   blood: {
@@ -1036,18 +1040,18 @@ const CLASS_DEFS = {
     color: "#ff6a88",
     projectileColor: "#ff7b98",
     projectileRgb: "255, 123, 152",
-    autoDamage: 23,
+    autoDamage: 21,
     speedMultiplier: 0.95,
-    maxHpMultiplier: 1.42,
+    maxHpMultiplier: 1.34,
     passiveLabel: "Hemomancy",
     passiveText: "Auto attacks drain life. Blood-marked enemies feed your sustain, and blood magic hardens you while you hold your ground.",
     passiveType: "blood",
     skillUnlocks: [5, 15, 25],
     unlockMessage: "Learned a new blood rite.",
     skills: [
-      { id: "vein-burst", title: "Vein Burst", icon: "\ud83d\udca5", slot: 1, cooldown: 7.1, role: "Panic", targeting: "self" },
-      { id: "crimson-pool", title: "Crimson Pool", icon: "\ud83e\ude78", slot: 2, cooldown: 11.4, role: "Zone", targeting: "self" },
-      { id: "blood-rite", title: "Blood Rite", icon: "\ud83e\uddea", slot: 3, cooldown: 15.2, role: "Signature", targeting: "self" },
+      { id: "vein-burst", title: "Vein Burst", icon: "\ud83d\udca5", slot: 1, cooldown: 7.8, role: "Panic", targeting: "self" },
+      { id: "crimson-pool", title: "Crimson Pool", icon: "\ud83e\ude78", slot: 2, cooldown: 10.8, role: "Zone", targeting: "self" },
+      { id: "blood-rite", title: "Blood Rite", icon: "\ud83e\uddea", slot: 3, cooldown: 14.4, role: "Signature", targeting: "self" },
     ],
   },
 };
@@ -1903,7 +1907,77 @@ function createDefaultMetaProgress() {
       totalXpCollected: 0,
       totalKills: 0,
     },
+    archive: {
+      challenges: {},
+      achievements: {},
+    },
   };
+}
+
+function normalizeArchiveUnlockMap(candidate, validDefs) {
+  const normalized = {};
+  const validIds = new Set(validDefs.map((entry) => entry.id));
+  if (!candidate || typeof candidate !== "object") {
+    return normalized;
+  }
+  for (const [id, value] of Object.entries(candidate)) {
+    if (!validIds.has(id)) {
+      continue;
+    }
+    if (typeof value === "string" && value.length > 0) {
+      normalized[id] = value;
+      continue;
+    }
+    if (typeof value === "boolean" && value) {
+      normalized[id] = "legacy";
+      continue;
+    }
+    if (value && typeof value === "object" && typeof value.completedAt === "string" && value.completedAt.length > 0) {
+      normalized[id] = value.completedAt;
+    }
+  }
+  return normalized;
+}
+
+function hasCompletedArchiveChallenge(id, meta = metaProgress) {
+  return Boolean(meta?.archive?.challenges?.[id]);
+}
+
+function hasCompletedArchiveAchievement(id, meta = metaProgress) {
+  return Boolean(meta?.archive?.achievements?.[id]);
+}
+
+function getCompletedArchiveChallengeCount(meta = metaProgress) {
+  return Object.keys(meta?.archive?.challenges ?? {}).length;
+}
+
+function getCompletedArchiveAchievementCount(meta = metaProgress) {
+  return Object.keys(meta?.archive?.achievements ?? {}).length;
+}
+
+function getArchiveChallengesByCategory(category) {
+  return ARCHIVE_CHALLENGES.filter((entry) => entry.category === category);
+}
+
+function getArchiveChallengeProgressPercent(meta = metaProgress) {
+  if (ARCHIVE_CHALLENGES.length <= 0) {
+    return 1;
+  }
+  return getCompletedArchiveChallengeCount(meta) / ARCHIVE_CHALLENGES.length;
+}
+
+function getPinnedArchiveChallenges(meta = metaProgress, limit = 3) {
+  return ARCHIVE_CHALLENGES.filter((entry) => !hasCompletedArchiveChallenge(entry.id, meta)).slice(0, limit);
+}
+
+function getLatestArchiveUnlock(meta = metaProgress) {
+  const unlocks = [
+    ...Object.entries(meta?.archive?.achievements ?? {}).map(([id, completedAt]) => ({ kind: "achievement", id, completedAt })),
+    ...Object.entries(meta?.archive?.challenges ?? {}).map(([id, completedAt]) => ({ kind: "challenge", id, completedAt })),
+  ]
+    .filter((entry) => entry.completedAt)
+    .sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt)));
+  return unlocks[0] ?? null;
 }
 
 function normalizeMetaProgress(candidate) {
@@ -1927,6 +2001,10 @@ function normalizeMetaProgress(candidate) {
       runs: Math.max(0, candidate.lifetime?.runs ?? 0),
       totalXpCollected: Math.max(0, candidate.lifetime?.totalXpCollected ?? 0),
       totalKills: Math.max(0, candidate.lifetime?.totalKills ?? 0),
+    },
+    archive: {
+      challenges: normalizeArchiveUnlockMap(candidate.archive?.challenges, ARCHIVE_CHALLENGES),
+      achievements: normalizeArchiveUnlockMap(candidate.archive?.achievements, ARCHIVE_ACHIEVEMENTS),
     },
   });
 }
@@ -2171,6 +2249,8 @@ const menuKicker = pauseOverlay.querySelector(".menu-kicker");
 const pauseTitle = document.getElementById("pauseTitle");
 const pauseSubtitle = document.getElementById("pauseSubtitle");
 const pauseMeta = document.getElementById("pauseMeta");
+const codexTabNav = document.getElementById("codexTabNav");
+const codexTabButtons = Array.from(codexTabNav?.querySelectorAll("[data-codex-tab]") ?? []);
 const upgradesButton = document.getElementById("upgradesButton");
 const upgradesList = document.getElementById("upgradesList");
 const closeUpgradesButton = document.getElementById("closeUpgradesButton");
@@ -2211,14 +2291,17 @@ const devClassButtons = document.getElementById("devClassButtons");
 const gameOverOverlay = document.getElementById("gameOverOverlay");
 const resultValue = document.getElementById("resultValue");
 const resultStats = document.getElementById("resultStats");
+const archiveRevealPanel = document.getElementById("archiveRevealPanel");
 const restartButton = document.getElementById("restartButton");
 const gameOverCard = gameOverOverlay.querySelector(".overlay-card");
 const fpsValue = document.getElementById("fpsValue");
 const startOverlay = document.getElementById("startOverlay");
 const classSelectGrid = document.getElementById("classSelectGrid");
 const classProgressCard = document.getElementById("classProgressCard");
+const archiveProgressCard = document.getElementById("archiveProgressCard");
 const startRunButton = document.getElementById("startRunButton");
 const startSubtitle = document.getElementById("startSubtitle");
+const archiveToastLayer = document.getElementById("archiveToastLayer");
 const touchControls = document.getElementById("touchControls");
 const touchMoveZone = document.getElementById("touchMoveZone");
 const touchJoystick = document.getElementById("touchJoystick");

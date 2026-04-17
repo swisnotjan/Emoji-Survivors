@@ -2791,6 +2791,10 @@ function finishRunSummary() {
   pauseOverlay.classList.add("hidden");
   levelUpOverlay.classList.add("hidden");
   bossRewardOverlay.classList.add("hidden");
+  evaluateArchiveUnlocks(false);
+  state.archiveRun.toastCurrent = null;
+  state.archiveRun.toastQueue = [];
+  renderArchiveToast();
   finalizeRunTelemetry();
   const unlockedClassId = applyRunMetaProgress();
   updateHud(true);
@@ -2798,6 +2802,7 @@ function finishRunSummary() {
     ? `Survived ${formatTime(state.elapsed)} and unlocked ${CLASS_DEFS[unlockedClassId].title}.`
     : `Survived ${formatTime(state.elapsed)} before the run collapsed.`;
   renderResultStats();
+  renderArchiveReveal();
   gameOverOverlay.classList.remove("hidden");
   retriggerEnterAnimation(gameOverOverlay, gameOverCard);
 }
@@ -2822,8 +2827,27 @@ function restartRun() {
   levelUpOverlay.classList.add("hidden");
   bossRewardOverlay.classList.add("hidden");
   gameOverOverlay.classList.add("hidden");
+  if (archiveRevealPanel) {
+    archiveRevealPanel.innerHTML = "";
+    archiveRevealPanel.classList.add("hidden");
+  }
+  renderArchiveToast();
   renderStartOverlay();
   updateHud(true);
+}
+
+function restartRunWithArchiveOutro() {
+  if (!gameOverOverlay.classList.contains("hidden") && archiveRevealPanel && !archiveRevealPanel.classList.contains("hidden")) {
+    gameOverCard.classList.add("is-leaving");
+    archiveRevealPanel.classList.add("is-leaving");
+    setTimeout(() => {
+      gameOverCard.classList.remove("is-leaving");
+      archiveRevealPanel.classList.remove("is-leaving");
+      restartRun();
+    }, 320);
+    return;
+  }
+  restartRun();
 }
 
 function formatTime(totalSeconds) {
@@ -4431,6 +4455,7 @@ function damagePlayer(rawDamage, source = null) {
   const reducedDamage = rawDamage * (1 - player.damageReduction);
   const perfTier = getPerformanceTier();
   const shakeScale = perfTier >= 3 ? 0 : perfTier >= 2 ? 0.4 : perfTier >= 1 ? 0.68 : 1;
+  trackArchiveEvent("damage_taken", { amount: reducedDamage, sourceKey: source?.key ?? null });
   recordTelemetryDamage(rawDamage, reducedDamage, source);
   player.hitFlash = clamp(player.hitFlash + reducedDamage / player.maxHp, 0, 1);
   player.hitShakeTimer = Math.max(player.hitShakeTimer, 0.22 * shakeScale);
