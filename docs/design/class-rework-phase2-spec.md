@@ -14,10 +14,10 @@ This document is intended as an implementation-ready spec for a second class ove
 
 Primary files:
 
-- [game/foundation.js](D:/tryings/vibecoding/emoji-survivors/game/foundation.js)
-- [game/runtime.js](D:/tryings/vibecoding/emoji-survivors/game/runtime.js)
-- [game/render.js](D:/tryings/vibecoding/emoji-survivors/game/render.js)
-- [scripts/verify/verify-class-behavior.mjs](D:/tryings/vibecoding/emoji-survivors/scripts/verify/verify-class-behavior.mjs)
+- [game/foundation.js](D:\tryings\vibecoding\Games\emoji-survivors/game/foundation.js)
+- [game/runtime.js](D:\tryings\vibecoding\Games\emoji-survivors/game/runtime.js)
+- [game/render.js](D:\tryings\vibecoding\Games\emoji-survivors/game/render.js)
+- [scripts/verify/verify-class-behavior.mjs](D:\tryings\vibecoding\Games\emoji-survivors/scripts/verify/verify-class-behavior.mjs)
 
 ## 1. Design goals
 

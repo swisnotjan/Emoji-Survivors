@@ -204,6 +204,7 @@ function createInitialState(classId = "wind") {
       manual: false,
       focus: false,
       upgradesPanel: false,
+      helpPanel: false,
       devMenu: false,
       codexTab: "build",
     },
@@ -365,6 +366,7 @@ function queueArchiveUnlock(kind, id, showToast = true) {
   state.archiveRun.revealEntries.push(entry);
   if (showToast) {
     state.archiveRun.toastQueue.push(entry);
+    window.sfx?.play("archiveUnlock");
     renderArchiveToast();
   }
 }
@@ -725,7 +727,395 @@ function hasAffliction(enemy) {
   return enemy.freezeTimer > 0 || enemy.brittleTimer > 0 || enemy.chillStacks > 0 || enemy.burnStacks > 0 || enemy.necroMarkTimer > 0 || enemy.bloodMarkTimer > 0;
 }
 
+const HOW_TO_PLAY_STORAGE_KEY = "emoji-survivors-howto-seen-v1";
+const START_OVERLAY_SHORT_DESCRIPTION = "Survive the horde, evolve your build, and erase the map with spellcraft.";
+let startOverlayFocusClassId = null;
+let classHoverTooltipElement = null;
+let audioMixerCloseTimer = null;
+let lastMusicUiVolume = 0.5;
+let lastSfxUiVolume = 0.5;
+
+function cancelAudioMixerClose() {
+  if (audioMixerCloseTimer) {
+    clearTimeout(audioMixerCloseTimer);
+    audioMixerCloseTimer = null;
+  }
+}
+
+function openAudioMixerPanel() {
+  if (!audioMixer) {
+    return;
+  }
+  cancelAudioMixerClose();
+  audioMixer.classList.add("is-open");
+}
+
+function queueAudioMixerClose() {
+  if (!audioMixer) {
+    return;
+  }
+  cancelAudioMixerClose();
+  audioMixerCloseTimer = setTimeout(() => {
+    audioMixer?.classList.remove("is-open");
+    audioMixerCloseTimer = null;
+  }, 220);
+}
+
+function hasSeenHowToPlay() {
+  try {
+    return window.localStorage?.getItem(HOW_TO_PLAY_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function markHowToPlaySeen() {
+  try {
+    window.localStorage?.setItem(HOW_TO_PLAY_STORAGE_KEY, "true");
+  } catch {
+    // ignore
+  }
+}
+
+function openHowToPlay(options = {}) {
+  if (!howToPlayOverlay) {
+    return;
+  }
+  state.pause.helpPanel = true;
+  pressedActions.clear();
+  resetTouchControls();
+  howToPlayOverlay.classList.remove("hidden");
+  howToPlayOverlay.classList.toggle("is-first-run", Boolean(options.firstRun));
+  if (options.firstRun) {
+    markHowToPlaySeen();
+  }
+  syncMusicPauseState();
+}
+
+function closeHowToPlay() {
+  if (!howToPlayOverlay) {
+    return;
+  }
+  state.pause.helpPanel = false;
+  howToPlayOverlay.classList.add("hidden");
+  howToPlayOverlay.classList.remove("is-first-run");
+  syncMusicPauseState();
+}
+
+function shouldPauseRunMusic() {
+  return state.running
+    && !state.runEnd.active
+    && (state.pause.manual || state.pause.focus || state.pause.upgradesPanel || state.pause.helpPanel || state.pause.devMenu);
+}
+
+function syncMusicPauseState() {
+  if (shouldPauseRunMusic()) {
+    window.sfx?.pauseRunMusic?.();
+  } else {
+    window.sfx?.resumeRunMusic?.();
+  }
+}
+
+function updateAudioMixerUI() {
+  if (!audioMixer) {
+    return;
+  }
+  const muted = Boolean(window.sfx?.isMuted?.());
+  const musicMuted = muted || Boolean(window.sfx?.isMusicMuted?.());
+  const sfxMuted = muted || Boolean(window.sfx?.isSfxMuted?.());
+  const musicVolume = Math.max(0, Math.min(1, Number(window.sfx?.getMusicVolume?.() ?? 0.5)));
+  const sfxVolume = Math.max(0, Math.min(1, Number(window.sfx?.getSfxVolume?.() ?? window.sfx?.getVolume?.() ?? 0.5)));
+
+  audioMixer.classList.toggle("is-master-muted", muted);
+  audioMixerButton?.setAttribute("aria-pressed", muted ? "true" : "false");
+  if (audioMixerButton) {
+    audioMixerButton.textContent = muted ? "\uD83D\uDD07" : "\uD83D\uDD0A";
+    audioMixerButton.title = muted ? "Sound off (M)" : "Sound on (M)";
+  }
+
+  if (musicVolumeSlider) {
+    musicVolumeSlider.value = String(Math.round(musicVolume * 100));
+  }
+  if (sfxVolumeSlider) {
+    sfxVolumeSlider.value = String(Math.round(sfxVolume * 100));
+  }
+  if (musicVolume > 0.001) {
+    lastMusicUiVolume = musicVolume;
+  }
+  if (sfxVolume > 0.001) {
+    lastSfxUiVolume = sfxVolume;
+  }
+  musicMuteButton?.classList.toggle("is-muted", musicMuted || musicVolume <= 0.001);
+  sfxMuteButton?.classList.toggle("is-muted", sfxMuted || sfxVolume <= 0.001);
+}
+
+function toggleStartSound() {
+  if (!window.sfx) {
+    return;
+  }
+  const prevMusicVolume = Math.max(0, Math.min(1, Number(window.sfx.getMusicVolume?.() ?? 0)));
+  const prevSfxVolume = Math.max(0, Math.min(1, Number(window.sfx.getSfxVolume?.() ?? window.sfx.getVolume?.() ?? 0)));
+  if (prevMusicVolume > 0.001) {
+    lastMusicUiVolume = prevMusicVolume;
+  }
+  if (prevSfxVolume > 0.001) {
+    lastSfxUiVolume = prevSfxVolume;
+  }
+  const muted = window.sfx.toggleMuted();
+  if (muted) {
+    window.sfx.setMusicMuted?.(true);
+    window.sfx.setSfxMuted?.(true);
+    window.sfx.setMusicVolume?.(0);
+    window.sfx.setSfxVolume?.(0);
+  } else {
+    const restoredMusic = Math.max(0.05, lastMusicUiVolume);
+    const restoredSfx = Math.max(0.05, lastSfxUiVolume);
+    window.sfx.setMusicVolume?.(restoredMusic);
+    window.sfx.setSfxVolume?.(restoredSfx);
+    window.sfx.setMusicMuted?.(false);
+    window.sfx.setSfxMuted?.(false);
+    if (state.running && !window.sfx.isRunMusicActive?.()) {
+      window.sfx.startRunMusic?.();
+    }
+  }
+  updateAudioMixerUI();
+}
+
+function setMusicVolumeFromUi(rawValue) {
+  if (!window.sfx?.setMusicVolume) {
+    return;
+  }
+  const hadAudibleMusic = (window.sfx.getMusicVolume?.() ?? 0) > 0.001
+    && !window.sfx.isMusicMuted?.();
+  const value = Math.max(0, Math.min(1, Number(rawValue)));
+  if (value > 0.001) {
+    lastMusicUiVolume = value;
+  }
+  window.sfx.setMusicVolume(value);
+  window.sfx.setMusicMuted?.(value <= 0.001);
+  if (!window.sfx.isMuted?.() && state.running && value > 0.001 && !hadAudibleMusic && !window.sfx.isRunMusicActive?.()) {
+    window.sfx.startRunMusic?.();
+  }
+  updateAudioMixerUI();
+}
+
+function setSfxVolumeFromUi(rawValue) {
+  if (!window.sfx?.setSfxVolume) {
+    return;
+  }
+  const value = Math.max(0, Math.min(1, Number(rawValue)));
+  if (value > 0.001) {
+    lastSfxUiVolume = value;
+  }
+  window.sfx.setSfxVolume(value);
+  window.sfx.setSfxMuted?.(value <= 0.001);
+  updateAudioMixerUI();
+}
+
+function toggleMusicMuteFromUi() {
+  if (!window.sfx) {
+    return;
+  }
+  const muted = Boolean(window.sfx.isMusicMuted?.()) || (window.sfx.getMusicVolume?.() ?? 0) <= 0.001;
+  const currentVolume = Math.max(0, Math.min(1, Number(window.sfx.getMusicVolume?.() ?? 0)));
+  if (muted) {
+    const restored = Math.max(0.05, lastMusicUiVolume);
+    window.sfx.setMusicVolume?.(restored);
+    window.sfx.setMusicMuted?.(false);
+    if (!window.sfx.isMuted?.() && state.running && !window.sfx.isRunMusicActive?.()) {
+      window.sfx.startRunMusic?.();
+    }
+  } else {
+    if (currentVolume > 0.001) {
+      lastMusicUiVolume = currentVolume;
+    }
+    window.sfx.setMusicMuted?.(true);
+    window.sfx.setMusicVolume?.(0);
+  }
+  updateAudioMixerUI();
+}
+
+function toggleSfxMuteFromUi() {
+  if (!window.sfx) {
+    return;
+  }
+  const muted = Boolean(window.sfx.isSfxMuted?.()) || (window.sfx.getSfxVolume?.() ?? 0) <= 0.001;
+  const currentVolume = Math.max(0, Math.min(1, Number(window.sfx.getSfxVolume?.() ?? 0)));
+  if (muted) {
+    const restored = Math.max(0.05, lastSfxUiVolume);
+    window.sfx.setSfxVolume?.(restored);
+    window.sfx.setSfxMuted?.(false);
+  } else {
+    if (currentVolume > 0.001) {
+      lastSfxUiVolume = currentVolume;
+    }
+    window.sfx.setSfxMuted?.(true);
+    window.sfx.setSfxVolume?.(0);
+  }
+  updateAudioMixerUI();
+}
+
+function playShortcutUiClick() {
+  window.sfx?.play("uiClick");
+}
+
+function getCurrentFocusClassId() {
+  if (startOverlayFocusClassId && CLASS_DEFS[startOverlayFocusClassId]) {
+    return startOverlayFocusClassId;
+  }
+  return metaProgress.selectedClassId;
+}
+
+function setStartOverlayFocusClass(classId, options = {}) {
+  if (!CLASS_DEFS[classId]) {
+    return;
+  }
+  startOverlayFocusClassId = classId;
+  const unlocked = Boolean(metaProgress.unlocked[classId]);
+  if (unlocked && options.persistSelection !== false) {
+    metaProgress.selectedClassId = classId;
+    saveMetaProgress();
+  }
+}
+
+function cycleStartOverlayFocus(delta) {
+  const currentClassId = getCurrentFocusClassId();
+  const currentIndex = Math.max(0, CLASS_ORDER.indexOf(currentClassId));
+  let attempts = 0;
+  let nextIndex = currentIndex;
+  do {
+    nextIndex = (nextIndex + delta + CLASS_ORDER.length) % CLASS_ORDER.length;
+    attempts += 1;
+    if (metaProgress.unlocked[CLASS_ORDER[nextIndex]]) {
+      break;
+    }
+  } while (attempts < CLASS_ORDER.length);
+  const nextClassId = CLASS_ORDER[nextIndex];
+  setStartOverlayFocusClass(nextClassId, { persistSelection: true });
+  renderStartOverlay();
+}
+
+function triggerLockedClassFeedback(button) {
+  if (!button) {
+    return;
+  }
+  button.classList.remove("is-failing");
+  void button.offsetWidth;
+  button.classList.add("is-failing");
+  window.setTimeout(() => {
+    button.classList.remove("is-failing");
+  }, 280);
+  window.sfx?.play("dashFail");
+}
+
+function ensureClassHoverTooltip() {
+  if (classHoverTooltipElement) {
+    return classHoverTooltipElement;
+  }
+  classHoverTooltipElement = document.createElement("div");
+  classHoverTooltipElement.className = "class-hover-tooltip hidden";
+  document.querySelector(".game-root")?.appendChild(classHoverTooltipElement);
+  return classHoverTooltipElement;
+}
+
+function hideClassHoverTooltip() {
+  if (!classHoverTooltipElement) {
+    return;
+  }
+  classHoverTooltipElement.classList.add("hidden");
+}
+
+function showClassHoverTooltip(button, classId) {
+  const tooltip = ensureClassHoverTooltip();
+  tooltip.innerHTML = buildClassHoverTooltipHtml(classId);
+  tooltip.classList.remove("hidden");
+  positionClassHoverTooltip(button, tooltip);
+}
+
+function positionClassHoverTooltip(anchor, tooltip) {
+  const anchorRect = anchor.getBoundingClientRect();
+  const tooltipRect = tooltip.getBoundingClientRect();
+  const x = clamp(anchorRect.left + anchorRect.width * 0.5 - tooltipRect.width * 0.5, 12, window.innerWidth - tooltipRect.width - 12);
+  const aboveY = anchorRect.top - tooltipRect.height - 10;
+  const y = aboveY >= 10 ? aboveY : Math.min(window.innerHeight - tooltipRect.height - 10, anchorRect.bottom + 10);
+  tooltip.style.left = `${Math.round(x)}px`;
+  tooltip.style.top = `${Math.round(y)}px`;
+}
+
+function buildClassHoverTooltipHtml(classId) {
+  const classDef = CLASS_DEFS[classId];
+  const requirement = CLASS_UNLOCK_REQUIREMENTS[classId];
+  const targetClassId = getCurrentUnlockTargetId(metaProgress);
+  const isCurrentTarget = classId === targetClassId;
+  if (!requirement || !requirement.enemyType) {
+    return [
+      `<div class="class-hover-head">🔓 ${classDef?.title ?? "Class"} is unlocked</div>`,
+    ].join("");
+  }
+  const enemyLabel = formatEnemyTypeLabel(requirement.enemyType);
+  const enemyEmoji = ENEMY_ARCHETYPES[requirement.enemyType]?.emoji ?? "\u2620\uFE0F";
+  const xpCurrent = isCurrentTarget ? Math.min(requirement.xp, metaProgress.unlockState.xp) : 0;
+  const killCurrent = isCurrentTarget ? Math.min(requirement.enemyKills, metaProgress.unlockState.kills) : 0;
+  const gateNote = isCurrentTarget
+    ? ""
+    : `<div class="class-hover-note">First unlock the previous mage in the chain.</div>`;
+  return [
+    `<div class="class-hover-head">\uD83D\uDD12 Unlock ${classDef?.title ?? "Class"}</div>`,
+    gateNote,
+    `<div class="class-hover-steps">`,
+    `<div class="class-hover-step"><span class="class-hover-index">1</span><div class="class-hover-copy"><strong>Gain XP</strong><span>${xpCurrent} / ${requirement.xp}</span></div></div>`,
+    `<div class="class-hover-step"><span class="class-hover-index">2</span><div class="class-hover-copy"><strong><span class="class-hover-enemy">${enemyEmoji}</span> Defeat ${enemyLabel}</strong><span>${killCurrent} / ${requirement.enemyKills}</span></div></div>`,
+    `</div>`,
+  ].join("");
+}
+
+function onClassThumbPointerMove(event) {
+  const button = event.target.closest(".class-thumb");
+  if (!button || !classThumbStrip?.contains(button)) {
+    hideClassHoverTooltip();
+    return;
+  }
+  const classId = button.dataset.classId;
+  if (!classId || metaProgress.unlocked[classId]) {
+    hideClassHoverTooltip();
+    return;
+  }
+  showClassHoverTooltip(button, classId);
+}
+
+function isSkillSoundSource(source) {
+  const sourceName = String(source ?? "");
+  return sourceName === "gale-ring" ||
+    sourceName === "crosswind-strip" ||
+    sourceName === "tempest-node" ||
+    sourceName === "blizzard-wake" ||
+    sourceName === "permafrost-seal" ||
+    sourceName === "crystal-spear" ||
+    sourceName === "cinder-halo" ||
+    sourceName === "sunspot" ||
+    sourceName === "ash-comet" ||
+    sourceName === "bone-ward" ||
+    sourceName === "requiem-field" ||
+    sourceName === "grave-call" ||
+    sourceName === "thrall" ||
+    sourceName === "vein-burst" ||
+    sourceName === "crimson-pool" ||
+    sourceName === "blood-rite" ||
+    sourceName === "holy-wave";
+}
+
 function bindEvents() {
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button) {
+      return;
+    }
+    if (button.dataset.noUiClick === "true") {
+      return;
+    }
+    window.sfx?.play("uiClick");
+  });
+
   window.addEventListener("keydown", (event) => {
     if (isDevToggleEvent(event)) {
       if (state.running && !state.levelUp.active && !state.bossReward.active) {
@@ -736,6 +1126,13 @@ function bindEvents() {
     }
 
     if (event.code === "Escape") {
+      if (state.pause.helpPanel) {
+        playShortcutUiClick();
+        closeHowToPlay();
+        event.preventDefault();
+        return;
+      }
+
       if (!state.running) {
         return;
       }
@@ -746,10 +1143,13 @@ function bindEvents() {
       }
 
       if (state.pause.upgradesPanel) {
+        playShortcutUiClick();
         closeUpgradesPanel();
       } else if (isPauseActive()) {
+        playShortcutUiClick();
         clearPause();
       } else {
+        playShortcutUiClick();
         setPause("manual", true);
       }
 
@@ -759,7 +1159,34 @@ function bindEvents() {
 
     if (event.code === "Tab") {
       if (state.running && !state.levelUp.active && !state.bossReward.active) {
+        playShortcutUiClick();
         toggleUpgradesPanel();
+      }
+      event.preventDefault();
+      return;
+    }
+
+    if (event.code === "KeyH" && !event.repeat && !event.ctrlKey && !event.metaKey) {
+      if (state.running && !state.levelUp.active && !state.bossReward.active) {
+        playShortcutUiClick();
+        if (state.pause.helpPanel) {
+          closeHowToPlay();
+        } else {
+          openHowToPlay();
+        }
+      }
+      event.preventDefault();
+      return;
+    }
+
+    if (event.code === "KeyM" && !event.repeat && !event.ctrlKey && !event.metaKey) {
+      const wasMuted = Boolean(window.sfx?.isMuted?.());
+      if (!wasMuted) {
+        playShortcutUiClick();
+      }
+      toggleStartSound();
+      if (wasMuted) {
+        playShortcutUiClick();
       }
       event.preventDefault();
       return;
@@ -809,6 +1236,7 @@ function bindEvents() {
     }
 
     if (!state.running && (event.code === "Space" || event.code === "Enter")) {
+      playShortcutUiClick();
       event.preventDefault();
       if (!startOverlay.classList.contains("hidden")) {
         startRun();
@@ -831,6 +1259,7 @@ function bindEvents() {
     pressedActions.clear();
     resetTouchControls();
     hideSkillTooltip();
+    hideClassHoverTooltip();
     if (state.running && !state.levelUp.active && !state.pause.upgradesPanel) {
       setPause("focus", true);
     }
@@ -852,6 +1281,17 @@ function bindEvents() {
   upgradeOptions.addEventListener("click", onUpgradeOptionClick);
   bossRewardOptions.addEventListener("click", onBossRewardOptionClick);
   upgradesButton.addEventListener("click", toggleUpgradesPanel);
+  helpButton?.addEventListener("click", () => {
+    if (state.running && !state.levelUp.active && !state.bossReward.active) {
+      openHowToPlay();
+    }
+  });
+  closeHowToButton?.addEventListener("click", closeHowToPlay);
+  howToPlayOverlay?.addEventListener("click", (event) => {
+    if (event.target === howToPlayOverlay) {
+      closeHowToPlay();
+    }
+  });
   closeUpgradesButton.addEventListener("click", closeUpgradesPanel);
   upgradesList.addEventListener("click", onUpgradeRowClick);
   codexTabNav?.addEventListener("click", onCodexTabClick);
@@ -894,7 +1334,27 @@ function bindEvents() {
   devSkillToggleList.addEventListener("click", onDevSkillToggleClick);
   devClassButtons.addEventListener("click", onDevClassButtonClick);
   startRunButton.addEventListener("click", startRun);
-  classSelectGrid.addEventListener("click", onClassCardClick);
+  classThumbStrip?.addEventListener("click", onClassThumbClick);
+  classThumbStrip?.addEventListener("pointermove", onClassThumbPointerMove);
+  classThumbStrip?.addEventListener("pointerleave", hideClassHoverTooltip);
+  classPreviewPrev?.addEventListener("click", () => cycleStartOverlayFocus(-1));
+  classPreviewNext?.addEventListener("click", () => cycleStartOverlayFocus(1));
+  audioMixerButton?.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleStartSound();
+    openAudioMixerPanel();
+  });
+  audioMixer?.addEventListener("pointerenter", openAudioMixerPanel);
+  audioMixer?.addEventListener("pointerleave", queueAudioMixerClose);
+  audioMixerPanel?.addEventListener("pointerenter", openAudioMixerPanel);
+  audioMixerPanel?.addEventListener("pointerleave", queueAudioMixerClose);
+  musicMuteButton?.addEventListener("click", toggleMusicMuteFromUi);
+  sfxMuteButton?.addEventListener("click", toggleSfxMuteFromUi);
+  musicVolumeSlider?.addEventListener("input", (event) => setMusicVolumeFromUi(Number(event.target.value) / 100));
+  sfxVolumeSlider?.addEventListener("input", (event) => setSfxVolumeFromUi(Number(event.target.value) / 100));
+  audioMixerPanel?.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+  });
   for (const card of [passiveSkillCard, ...skillCardElements.map((entry) => entry.root)]) {
     if (!card) {
       continue;
@@ -919,6 +1379,7 @@ function bindEvents() {
   window.addEventListener("pointermove", onTouchPointerMove, { passive: false });
   window.addEventListener("pointerup", onTouchPointerEnd);
   window.addEventListener("pointercancel", onTouchPointerEnd);
+  updateAudioMixerUI();
 }
 
 function resizeCanvas() {
@@ -1319,6 +1780,11 @@ function update(dt) {
   state.tick += 1;
   state.elapsed += dt;
   state.metaRun.activeDuration += dt;
+  const hpRatio = state.player.hp / Math.max(1, state.player.maxHp);
+  if (hpRatio < 0.35) {
+    const danger = Math.max(0, 1 - hpRatio * 1.35);
+    window.sfx?.play("heartbeat", { intensity: 0.6 + danger * 0.5 });
+  }
 
   updatePlayerMovement(dt);
   updatePlayerRegeneration(dt);
@@ -1565,6 +2031,7 @@ function tryDash() {
   }
 
   spawnDashEffect(player.x, player.y, dirX, dirY);
+  window.sfx?.play("dash");
   updateHud(true);
   return true;
 }
@@ -1572,6 +2039,7 @@ function tryDash() {
 function triggerDashUnavailableFeedback() {
   const dash = state.player.dash;
   dash.failFlashTimer = Math.max(dash.failFlashTimer, 0.34);
+  window.sfx?.play("dashFail");
   updateDashHud();
 }
 
@@ -2041,12 +2509,19 @@ function collectHealPickup(pickup) {
   pickup.dead = true;
   state.player.hp = Math.min(state.player.maxHp, state.player.hp + pickup.healAmount * state.player.healingMultiplier);
   spawnHealPickupEffect(pickup.x, pickup.y);
+  window.sfx?.play("pickupHeal");
   updateHud(false);
 }
 
 function collectXpPickup(pickup) {
   pickup.dead = true;
   spawnXpPickupEffect(pickup.x, pickup.y, pickup.type === "xp-cache" ? 1.22 : 0.86);
+  if (pickup.type === "xp-cache") {
+    window.sfx?.play("pickupCache");
+  } else {
+    const chain = Math.min(12, Math.max(0, Math.floor(state.metaRun.xpCollected / 60)));
+    window.sfx?.play("pickupXp", { chain });
+  }
   if (!pickup.claimed) {
     grantExperience(pickup.xpAmount);
   }
@@ -2894,6 +3369,7 @@ function spawnBoss(enemyType) {
   recordTelemetryBossSpawn(boss);
   trackArchiveEvent("boss_spawned", { bossType: enemyType });
   spawnBossIntroEffect(boss);
+  window.sfx?.play("bossSpawn");
   return boss;
 }
 
@@ -3118,8 +3594,12 @@ function updateEnemiesAndSpatialGrid(dt) {
 
     const freezeMultiplier = enemy.freezeTimer > 0 ? (enemy.isBoss ? 0.28 : 0) : 1;
     const moveMultiplier = (1 - clamp(enemy.slowAmount, 0, 0.75)) * freezeMultiplier * hasteMultiplier;
+    const phaseBefore = enemy.phase;
     if (moveMultiplier > 0) {
       updateEnemyBehavior(enemy, dt, moveMultiplier, player);
+    }
+    if (enemy.isBoss && phaseBefore !== enemy.phase) {
+      window.sfx?.play("bossPhase");
     }
 
     moveCircleEntity(enemy, enemy.knockbackVX * dt, enemy.knockbackVY * dt, enemy.radius, getEntityCollisionOptions(enemy));
@@ -4951,6 +5431,15 @@ function dealDamageToEnemy(enemy, amount, source = "generic") {
   }
   spawnDamageNumber(enemy.x, enemy.y - enemy.radius * 0.4, amount, source);
   enemy.hp -= amount;
+  if (!isSkillSoundSource(source)) {
+    if (enemy.isBoss) {
+      window.sfx?.play("bossHit");
+    } else if (source === "crit") {
+      window.sfx?.play("crit", { intensity: 1 });
+    } else {
+      window.sfx?.play("hit", { intensity: Math.min(1, 0.6 + amount / 120) });
+    }
+  }
   if (enemy.isBoss) {
     state.hudMotion.bossBarShakeTimer = 0.24;
   }
@@ -5124,7 +5613,7 @@ function resolveProjectileEnemyCollisions(grid) {
           const playerOwned = projectile.owner === "player" || projectile.owner === "skill";
           const damageInfo = playerOwned ? computePlayerProjectileDamage(enemy, projectile) : { damage: projectile.damage, crit: false };
           applyHitResponse(enemy, projectile, state.player.weapon, damageInfo.crit);
-          dealDamageToEnemy(enemy, damageInfo.damage, projectile.skillType ?? projectile.owner ?? "projectile");
+          dealDamageToEnemy(enemy, damageInfo.damage, damageInfo.crit ? "crit" : projectile.skillType ?? projectile.owner ?? "projectile");
 
           projectile.pierce -= 1;
 
@@ -5224,6 +5713,7 @@ function onEnemyDefeated(enemy, source = "unknown") {
   maybeRaiseThrall(enemy);
   trackArchiveEvent("enemy_defeated", { enemy, source });
   if (enemy.isBoss) {
+    window.sfx?.play("bossKill");
     recordTelemetryBossDefeat(enemy);
     state.bossDefeats[enemy.type] = (state.bossDefeats[enemy.type] ?? 0) + 1;
     trackArchiveEvent("boss_defeated", { bossType: enemy.type, enemy, source });
@@ -5231,6 +5721,9 @@ function onEnemyDefeated(enemy, source = "unknown") {
     scheduleNextBossEncounter(state.elapsed);
     openBossRewardChoices(enemy);
     return;
+  }
+  if (!isSkillSoundSource(source)) {
+    window.sfx?.play("kill");
   }
 }
 
@@ -5777,6 +6270,7 @@ function grantExperience(baseXp) {
   }
 
   if (gainedLevel) {
+    window.sfx?.play("levelUp");
     startLevelUpPauseIfNeeded();
   }
 
@@ -6519,6 +7013,9 @@ function applyUpgradeOption(option, config = {}) {
   if (applied === false) {
     return;
   }
+  if (option.family !== "skill" && option.family !== "mastery") {
+    window.sfx?.play("upgradeSelect");
+  }
   recordTelemetryReward(rewardKind, option, {
     rewardLevel,
     stacksBefore,
@@ -6654,6 +7151,7 @@ function trySelectBossRewardByIndex(index) {
 
 function applyBossRewardOption(option) {
   option.apply(state);
+  window.sfx?.play("upgradeSelect");
   recordTelemetryReward("boss", option, {
     bossType: state.bossReward.bossType,
     bossName: state.bossReward.bossName,
@@ -6671,7 +7169,7 @@ function applyBossRewardOption(option) {
 }
 
 function isPauseActive() {
-  return state.pause.manual || state.pause.focus || state.pause.upgradesPanel || state.pause.devMenu;
+  return state.pause.manual || state.pause.focus || state.pause.upgradesPanel || state.pause.helpPanel || state.pause.devMenu;
 }
 
 function setPause(kind, value) {
@@ -6681,21 +7179,26 @@ function setPause(kind, value) {
     resetTouchControls();
   }
   refreshPauseOverlay();
+  syncMusicPauseState();
 }
 
 function clearPause() {
   state.pause.manual = false;
   state.pause.focus = false;
   state.pause.upgradesPanel = false;
+  state.pause.helpPanel = false;
   state.pause.devMenu = false;
   state.pause.codexTab = "build";
+  howToPlayOverlay?.classList.add("hidden");
   refreshPauseOverlay();
+  syncMusicPauseState();
 }
 
 function refreshPauseOverlay() {
   const wasHidden = pauseOverlay.classList.contains("hidden");
-  const visible = state.running && !state.levelUp.active && isPauseActive();
+  const visible = state.running && !state.levelUp.active && !state.bossReward.active && (state.pause.manual || state.pause.focus || state.pause.upgradesPanel || state.pause.devMenu);
   pauseOverlay.classList.toggle("hidden", !visible);
+  syncMusicPauseState();
   if (!visible) {
     return;
   }
@@ -6890,17 +7393,22 @@ function renderDevClassPanel() {
   }).join("");
 }
 
-function onClassCardClick(event) {
-  const button = event.target.closest(".class-card");
+function onClassThumbClick(event) {
+  const button = event.target.closest(".class-thumb");
   if (!button) {
     return;
   }
   const classId = button.dataset.classId;
-  if (!metaProgress.unlocked[classId]) {
+  if (!CLASS_DEFS[classId]) {
     return;
   }
-  metaProgress.selectedClassId = classId;
-  saveMetaProgress();
+  const unlocked = Boolean(metaProgress.unlocked[classId]);
+  if (!unlocked) {
+    triggerLockedClassFeedback(button);
+    showClassHoverTooltip(button, classId);
+    return;
+  }
+  setStartOverlayFocusClass(classId, { persistSelection: true });
   renderStartOverlay();
 }
 
@@ -6910,7 +7418,7 @@ function getUnlockProgressText(classId) {
     return "Unlocked by default.";
   }
   const xp = `${Math.min(requirement.xp, metaProgress.unlockState.xp)} / ${requirement.xp} XP`;
-  const kills = `${Math.min(requirement.enemyKills, metaProgress.unlockState.kills)} / ${requirement.enemyKills} ${requirement.enemyType} kills`;
+  const kills = `${Math.min(requirement.enemyKills, metaProgress.unlockState.kills)} / ${requirement.enemyKills} ${formatEnemyTypeLabel(requirement.enemyType)} kills`;
   return `${xp} - ${kills}`;
 }
 
@@ -6924,85 +7432,189 @@ function formatEnemyTypeLabel(enemyType) {
     .join(" ");
 }
 
-function buildUnlockEnemyMarkup(requirement) {
-  if (!requirement?.enemyType) {
-    return "";
+function getUnlockInstructionText(classId) {
+  const requirement = CLASS_UNLOCK_REQUIREMENTS[classId];
+  if (!requirement || !requirement.enemyType) {
+    return "This class is available by default.";
   }
-  const enemyProfile = ENEMY_ARCHETYPES[requirement.enemyType];
-  const enemyEmoji = enemyProfile?.emoji ?? "\u2620\uFE0F";
-  const currentKills = Math.min(requirement.enemyKills, metaProgress.unlockState.kills);
+  const enemyLabel = formatEnemyTypeLabel(requirement.enemyType);
+  const xpCurrent = Math.min(requirement.xp, metaProgress.unlockState.xp);
+  const killsCurrent = Math.min(requirement.enemyKills, metaProgress.unlockState.kills);
   return [
-    `<div class="class-card-requirement">`,
-    `<span class="class-card-requirement-icon">${enemyEmoji}</span>`,
-    `<span class="class-card-requirement-text">Kill ${currentKills} / ${requirement.enemyKills} ${formatEnemyTypeLabel(requirement.enemyType)}</span>`,
-    `</div>`,
-  ].join("");
+    `Unlock ${CLASS_DEFS[classId]?.title ?? "class"}:`,
+    `1) Gain XP: ${xpCurrent} / ${requirement.xp}`,
+    `2) Defeat ${enemyLabel}: ${killsCurrent} / ${requirement.enemyKills}`,
+  ].join("\n");
+}
+
+function getClassThemePalette(classId) {
+  switch (classId) {
+    case "wind":
+      return { a: "rgba(154, 224, 255, 0.42)", b: "rgba(116, 192, 255, 0.32)", c: "rgba(176, 245, 255, 0.2)" };
+    case "frost":
+      return { a: "rgba(119, 176, 255, 0.44)", b: "rgba(78, 132, 240, 0.34)", c: "rgba(146, 207, 255, 0.22)" };
+    case "fire":
+      return { a: "rgba(255, 179, 112, 0.44)", b: "rgba(255, 124, 74, 0.34)", c: "rgba(255, 210, 132, 0.22)" };
+    case "necro":
+      return { a: "rgba(136, 223, 158, 0.4)", b: "rgba(88, 178, 116, 0.34)", c: "rgba(176, 236, 176, 0.2)" };
+    case "blood":
+      return { a: "rgba(255, 160, 198, 0.42)", b: "rgba(236, 119, 164, 0.34)", c: "rgba(255, 198, 214, 0.22)" };
+    default:
+      return { a: "rgba(255, 214, 140, 0.34)", b: "rgba(189, 129, 75, 0.3)", c: "rgba(255, 228, 168, 0.2)" };
+  }
+}
+
+function getSkillPreviewCopy(classId, skillId) {
+  const map = {
+    wind: {
+      "gale-ring": "Point-blank knockback burst.",
+      "crosswind-strip": "Moving wind lane that shreds packs.",
+      "tempest-node": "Storm core that chains displacement.",
+    },
+    frost: {
+      "blizzard-wake": "Icy ring that rapidly chills nearby foes.",
+      "permafrost-seal": "Freeze field for hard crowd control.",
+      "crystal-spear": "Priority spear that cracks tough targets.",
+    },
+    fire: {
+      "cinder-halo": "Burning nova around the caster.",
+      "sunspot": "Persistent fire zone for stack pressure.",
+      "ash-comet": "Heavy comet impact on enemy clusters.",
+    },
+    necro: {
+      "bone-ward": "Defensive cast with close-range punish.",
+      "requiem-field": "Decay zone that feeds summon tempo.",
+      "grave-call": "Signature summon spike and reset.",
+    },
+    blood: {
+      "vein-burst": "Blood shockwave for burst sustain.",
+      "crimson-pool": "Healing pool that controls close space.",
+      "blood-rite": "Risk spike for damage and lifedrain.",
+    },
+  };
+  return map[classId]?.[skillId] ?? "Class skill.";
 }
 
 function renderStartOverlay() {
-  classSelectGrid.innerHTML = "";
+  hideClassHoverTooltip();
+  classThumbStrip.innerHTML = "";
   const targetClassId = getCurrentUnlockTargetId(metaProgress);
   const visibleClassIds = CLASS_ORDER.slice();
+  const focusedClassId = getCurrentFocusClassId();
+  const focusedClassDef = CLASS_DEFS[focusedClassId];
+  const focusedUnlocked = Boolean(metaProgress.unlocked[focusedClassId]);
+  const focusTheme = getClassThemePalette(focusedClassId);
   if (startSubtitle) {
-    startSubtitle.textContent = targetClassId
-      ? "Unlock classes in sequence. Only the next locked mage shows active requirements."
-      : "All mage archives recovered. Choose any unlocked class.";
+    startSubtitle.textContent = START_OVERLAY_SHORT_DESCRIPTION;
   }
-  for (const classId of visibleClassIds) {
+  if (startMagePanel) {
+    startMagePanel.style.setProperty("--class-a", focusTheme.a);
+    startMagePanel.style.setProperty("--class-b", focusTheme.b);
+    startMagePanel.style.setProperty("--class-c", focusTheme.c);
+  }
+
+  if (classPreviewHero) {
+    classPreviewHero.textContent = focusedClassDef?.playerEmoji ?? "\uD83E\uDDD9\uFE0F";
+    classPreviewHero.classList.toggle("is-locked", !focusedUnlocked);
+  }
+
+  if (classPreviewSkills) {
+    classPreviewSkills.innerHTML = (focusedClassDef?.skills ?? []).map((skill) => [
+      `<div class="mage-skill-row">`,
+      `<div class="mage-skill-icon">${skill.icon}</div>`,
+      `<div class="mage-skill-copy"><strong>${skill.title}</strong><span>${getSkillPreviewCopy(focusedClassId, skill.id)}</span></div>`,
+      `<div class="mage-skill-slot">S${skill.slot}</div>`,
+      `</div>`,
+    ].join("")).join("");
+  }
+
+  for (let index = 0; index < visibleClassIds.length; index += 1) {
+    const classId = visibleClassIds[index];
     const classDef = CLASS_DEFS[classId];
     const unlocked = Boolean(metaProgress.unlocked[classId]);
     const isCurrentTarget = classId === targetClassId;
-    const selected = metaProgress.selectedClassId === classId;
+    const selected = focusedClassId === classId;
+    const classTheme = getClassThemePalette(classId);
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "class-card";
+    button.className = "class-thumb";
+    button.style.setProperty("--card-index", String(index));
     button.dataset.classId = classId;
     button.classList.toggle("is-selected", selected);
     button.classList.toggle("is-locked", !unlocked);
-    const requirementMarkup = !unlocked && isCurrentTarget ? buildUnlockEnemyMarkup(CLASS_UNLOCK_REQUIREMENTS[classId]) : "";
-    const lockedText = unlocked
-      ? "Unlocked"
-      : isCurrentTarget
-        ? `Locked - ${getUnlockProgressText(classId)}`
-        : "Locked - Unlock the previous class first";
+    const lockChipMarkup = unlocked
+      ? ""
+      : `<span class="class-thumb-chip"><span class="class-lock-icon">\uD83D\uDD12</span><span>Locked</span></span>`;
+    if (!unlocked) {
+      const tooltipText = isCurrentTarget
+        ? getUnlockInstructionText(classId)
+        : `Unlock ${CLASS_DEFS[classId].title}:\n1) Unlock the previous mage first.\n2) Then complete this class objective.`;
+      button.dataset.lockedTooltip = tooltipText;
+    } else {
+      button.removeAttribute("data-locked-tooltip");
+    }
+    button.style.setProperty("--class-a", classTheme.a);
+    button.style.setProperty("--class-b", classTheme.b);
+    button.style.setProperty("--class-c", classTheme.c);
     button.innerHTML = [
-      `<div class="class-card-icon">${classDef.icon}</div>`,
-      `<div class="class-card-title">${classDef.title}</div>`,
-      `<div class="class-card-meta">${classDef.passiveText}</div>`,
-      requirementMarkup,
-      `<div class="class-card-lock">${lockedText}</div>`,
+      `<div class="class-thumb-icon-bg"><span class="class-thumb-icon">${classDef.playerEmoji}</span></div>`,
+      `<div class="class-thumb-title">${classDef.title}</div>`,
+      lockChipMarkup,
     ].join("");
-    classSelectGrid.appendChild(button);
+    classThumbStrip.appendChild(button);
   }
 
   if (!targetClassId) {
-    classProgressCard.innerHTML = `<div class="class-progress-head"><span class="class-progress-title">All classes unlocked</span><strong>Complete</strong></div><div class="class-progress-meta"><span class="class-progress-chip">All mage archives recovered.</span></div>`;
+    classProgressCard.innerHTML = [
+      `<div class="class-progress-head class-progress-head-complete">`,
+      `<div><span class="class-progress-kicker">Archive Status</span><span class="class-progress-title">All mages unlocked</span></div>`,
+      `<strong>\u2714</strong>`,
+      `</div>`,
+      `<div class="class-progress-meta">`,
+      `<span class="class-progress-chip">Every class is ready for play.</span>`,
+      `<span class="class-progress-chip">Pick any mage and start a run.</span>`,
+      `</div>`,
+    ].join("");
   } else {
     const requirement = CLASS_UNLOCK_REQUIREMENTS[targetClassId];
     const enemyProfile = requirement.enemyType ? ENEMY_ARCHETYPES[requirement.enemyType] : null;
     const enemyEmoji = enemyProfile?.emoji ?? "\u2620\uFE0F";
+    const enemyLabel = formatEnemyTypeLabel(requirement.enemyType);
     classProgressCard.innerHTML = [
-      `<div class="class-progress-head"><span class="class-progress-title">Next unlock: ${CLASS_DEFS[targetClassId].title}</span><strong>${CLASS_DEFS[targetClassId].icon}</strong></div>`,
+      `<div class="class-progress-head">`,
+      `<div><span class="class-progress-kicker">Next Unlock</span><span class="class-progress-title">${CLASS_DEFS[targetClassId].title}</span></div>`,
+      `<strong>${CLASS_DEFS[targetClassId].icon}</strong>`,
+      `</div>`,
       `<div class="class-progress-meta">`,
-      `<span class="class-progress-chip">XP ${Math.min(metaProgress.unlockState.xp, requirement.xp)} / ${requirement.xp}</span>`,
-      `<span class="class-progress-chip">${enemyEmoji} ${formatEnemyTypeLabel(requirement.enemyType)} ${Math.min(metaProgress.unlockState.kills, requirement.enemyKills)} / ${requirement.enemyKills}</span>`,
-      `<span class="class-progress-chip">Runs ${metaProgress.lifetime.runs}</span>`,
+      `<span class="class-progress-chip">Gain XP: ${Math.min(metaProgress.unlockState.xp, requirement.xp)} / ${requirement.xp}</span>`,
+      `<span class="class-progress-chip">${enemyEmoji} Defeat ${enemyLabel}: ${Math.min(metaProgress.unlockState.kills, requirement.enemyKills)} / ${requirement.enemyKills}</span>`,
       `</div>`,
     ].join("");
   }
 
   renderArchiveProgressCard();
-  startRunButton.textContent = `Start ${CLASS_DEFS[metaProgress.selectedClassId].title}`;
+  const selectedClassDef = CLASS_DEFS[metaProgress.selectedClassId];
+  startRunButton.textContent = focusedUnlocked
+    ? `${focusedClassDef.playerEmoji} Start ${focusedClassDef.title}`
+    : `${selectedClassDef.playerEmoji} Start ${selectedClassDef.title}`;
+  updateAudioMixerUI();
   startOverlay.classList.toggle("hidden", state.running);
 }
 
 function startRun() {
+  const shouldShowHowTo = !hasSeenHowToPlay();
+  hideClassHoverTooltip();
   resetTouchControls();
   state = createInitialState(metaProgress.selectedClassId);
   state.running = true;
   startOverlay.classList.add("hidden");
+  window.sfx?.play("runStart");
+  window.sfx?.startRunMusic?.();
   updateHud(true);
   render();
+  if (shouldShowHowTo) {
+    openHowToPlay({ firstRun: true });
+  }
 }
 
 function chooseRandomBossType() {

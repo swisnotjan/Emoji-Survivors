@@ -2743,8 +2743,12 @@ function endRun(options = {}) {
   if (!state.running) {
     return;
   }
+  if (!instant) {
+    window.sfx?.play("runOver");
+  }
 
   if (instant) {
+    window.sfx?.stopRunMusic?.({ immediate: true });
     state.runEnd.active = false;
     state.runEnd.timer = 0;
     state.runEnd.cause = cause;
@@ -2756,6 +2760,7 @@ function endRun(options = {}) {
   state.runEnd.active = true;
   state.runEnd.timer = 0;
   state.runEnd.cause = cause;
+  window.sfx?.setRunMusicDeathProgress?.(0);
   pressedActions.clear();
 }
 
@@ -2784,6 +2789,7 @@ function applyRunMetaProgress() {
 }
 
 function finishRunSummary() {
+  window.sfx?.stopRunMusic?.({ immediate: false });
   state.running = false;
   state.runEnd.active = false;
   state.levelUp.active = false;
@@ -2810,6 +2816,7 @@ function finishRunSummary() {
 function updateRunEndSequence(dt) {
   state.runEnd.timer = Math.min(state.runEnd.duration, state.runEnd.timer + dt);
   const deathProgress = clamp(state.runEnd.timer / state.runEnd.duration, 0, 1);
+  window.sfx?.setRunMusicDeathProgress?.(deathProgress);
   const timeScale = lerp(1, 0.18, smoothstep(0.08, 1, deathProgress));
   state.elapsed += dt * timeScale;
   updateEffects(dt * timeScale);
@@ -2819,6 +2826,7 @@ function updateRunEndSequence(dt) {
 }
 
 function restartRun() {
+  window.sfx?.stopRunMusic?.({ immediate: true });
   state = createInitialState(metaProgress.selectedClassId);
   pressedActions.clear();
   accumulator = 0;
@@ -4453,6 +4461,7 @@ function damagePlayer(rawDamage, source = null) {
   }
 
   const reducedDamage = rawDamage * (1 - player.damageReduction);
+  window.sfx?.play("damage");
   const perfTier = getPerformanceTier();
   const shakeScale = perfTier >= 3 ? 0 : perfTier >= 2 ? 0.4 : perfTier >= 1 ? 0.68 : 1;
   trackArchiveEvent("damage_taken", { amount: reducedDamage, sourceKey: source?.key ?? null });

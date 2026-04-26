@@ -2,7 +2,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 ?????? ????? ?????????? ? ????? ??????? ???? ? ????? vampire survivors. ???????? ????????? ? ?????? ?????? ??????. ?????????? ????? wasd ??? ???????. ?????????????? ????? ?? ?????????? ?????. ???? ?????? ?????? ?????? ??????????? ????? ? ??? ???? ?????? (????? ???????, ??????; ???????? ? ???????????; ???????? ?  ?????????). ????? ??????? ??????? ????????? ????????????, ????? ????????? ??? ??????? ? ????? ?????? ??????????? ? ??????
 
 ## Completed
-- Created new project directory: `D:\tryings\vibecoding\emoji-survivors`.
+- Created new project directory: `D:\tryings\vibecoding\Games\emoji-survivors`.
 - Implemented playable top-down survivor prototype with:
   - Movement: WASD + Arrow keys.
   - Auto-fire: nearest enemy targeting.
@@ -103,7 +103,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - One general Playwright smoke run covering movement/combat after the balance pass.
 
 ## Latest verification
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes after the harder-boss pass.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes after the harder-boss pass.
 - Boss verification script now generates:
   - `output/web-game/boss-check/countess.png/.json`
   - `output/web-game/boss-check/colossus.png/.json`
@@ -185,7 +185,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 
 ## Verification run (2026-04-08)
 - Syntax:
-  - `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+  - `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Required Playwright smoke run via `$develop-web-game` client:
   - `output/web-game/screens-upgrades-dash-smoke/shot-0.png`
   - `output/web-game/screens-upgrades-dash-smoke/shot-1.png`
@@ -218,7 +218,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - Added numeric boss HP text next to the boss name in the top boss HUD.
 
 ## Verification run (UI follow-up)
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Smoke run:
   - `output/web-game/screens-ui-fixes-smoke/shot-0.png`
   - `output/web-game/screens-ui-fixes-smoke/shot-1.png`
@@ -287,7 +287,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
   - `defeatPrimaryBoss()`
 
 ## Verification run (boss rewards / pickups)
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Smoke run:
   - `output/web-game/screens-bossrewards-pickups-smoke/shot-0.png`
   - `output/web-game/screens-bossrewards-pickups-smoke/shot-1.png`
@@ -329,7 +329,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - Maxed upgrades in the dev menu no longer show `Click to add`.
 
 ## Verification run (UI polish pass)
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Smoke run:
   - `output/web-game/screens-ui-pass-final/shot-0.png`
   - `output/web-game/screens-ui-pass-final/shot-1.png`
@@ -370,7 +370,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - Zen Mode still auto-resolves normal level-ups, but boss kills now keep manual legendary selection.
 
 ## Verification run (codex / bars / pickups / legendary)
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Smoke run:
   - `output/web-game/screens-ui-hud-pickups-final/shot-0.png`
   - `output/web-game/screens-ui-hud-pickups-final/shot-1.png`
@@ -424,7 +424,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - Added hard boss-cycle limit: each boss can only be defeated three times total, after which further spawns of that boss are blocked.
 
 ## Verification run (terrain / overlays / boss-cycle)
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Smoke run:
   - `output/web-game/screens-terrain-overlays-final/shot-0.png`
   - `output/web-game/screens-terrain-overlays-final/shot-1.png`
@@ -567,7 +567,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - Tightened level-up / boss overlay ray masks so the rays fade outward instead of staying equally strong across the whole radius.
 
 ## Verification run (death / gradients)
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Required Playwright smoke run via `$develop-web-game` client:
   - `output/web-game/shot-0.png`
   - `output/web-game/shot-1.png`
@@ -606,7 +606,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - Added visible feature counts and a nearby-feature debug hook for deterministic verification.
 
 ## Verification run (world features)
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Required Playwright smoke run via `$develop-web-game` client refreshed `output/web-game/shot-0.png ... shot-2.png` and `state-0.json ... state-2.json`; no `errors-*.json` in `output/web-game`.
 - Targeted world-feature verification:
   - `output/web-game/verify-world-features/water-scene.png`
@@ -631,7 +631,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - Fixed death-camera background coverage by rendering terrain against the zoomed world extents instead of the unzoomed viewport.
 
 ## Verification run (map / death refresh)
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Required Playwright smoke run via `$develop-web-game` client refreshed `output/web-game/shot-0.png ... shot-2.png` and matching `state-0.json ... state-2.json`; still no `errors-*.json` in `output/web-game`.
 - Targeted browser verification:
   - `output/web-game/verify-map-death-pass/run-a.png`
@@ -668,7 +668,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - Added targeted verification script: `verify-xp-water-pass.mjs`.
 
 ## Verification run (XP/water pass)
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Required Playwright smoke run via `$WEB_GAME_CLIENT` completed; latest artifacts landed in `output/web-game/shot-0..2.png` and `state-0..2.json` (client again wrote to the root output dir rather than a nested folder).
 - Targeted browser verification script artifacts:
   - `output/web-game/verify-xp-water-pass/water-ripple-a.png/.json`
@@ -702,7 +702,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - Increased HP/XP HUD number size.
 
 ## Verification run (terrain / pickups / pathing pass)
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Required Playwright smoke run via `$WEB_GAME_CLIENT` completed after the patch; latest client output refreshed `output/web-game/shot-0..2.png` and matching `state-0..2.json`.
 - Targeted browser verification script:
   - `output/web-game/verify-terrain-pickups-pathing/water-soft-a.png/.json`
@@ -732,7 +732,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - Increased HP/XP number size again.
 
 ## Verification run (pickup suction + square rocks + detour optimization)
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Required Playwright smoke run via `$WEB_GAME_CLIENT` completed again after the optimization pass; latest client output refreshed `output/web-game/shot-0..2.png` and `state-0..2.json`.
 - Refreshed targeted browser verification with `verify-terrain-pickups-pathing.mjs`.
 - Confirmed:
@@ -816,9 +816,9 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 
 ## Verification: class/progression overhaul
 - Syntax:
-  - `node --check D:\tryings\vibecoding\emoji-survivors\app.js`
+  - `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js`
 - Targeted progression verification:
-  - `D:\tryings\vibecoding\emoji-survivors\verify-class-overhaul.mjs`
+  - `D:\tryings\vibecoding\Games\emoji-survivors\verify-class-overhaul.mjs`
   - artifacts:
     - `output/web-game/verify-class-overhaul/start-overlay.png`
     - `output/web-game/verify-class-overhaul/level5-skill.png`
@@ -833,7 +833,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
   - codex opens in `mode: paused`
   - dev menu opens in `mode: paused` with `devMenuOpen: true`
 - Targeted class behavior verification:
-  - `D:\tryings\vibecoding\emoji-survivors\verify-class-behavior.mjs`
+  - `D:\tryings\vibecoding\Games\emoji-survivors\verify-class-behavior.mjs`
   - artifacts:
     - `output/web-game/verify-class-behavior/wind-skill.png`
     - `output/web-game/verify-class-behavior/frost-passive.png`
@@ -895,7 +895,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 
 ## Verification: HUD / start / codex polish
 - Syntax:
-  - `node --check D:\tryings\vibecoding\emoji-survivors\app.js`
+  - `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js`
 - Targeted UI verification refreshed:
   - `output/web-game/verify-class-overhaul/start-overlay.png`
   - `output/web-game/verify-class-overhaul/level5-skill-hud.png`
@@ -955,7 +955,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 
 ## Verification: skill HUD / tooltip / card redesign pass
 - Syntax:
-  - `node --check D:\tryings\vibecoding\emoji-survivors\app.js`
+  - `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js`
 - Targeted verification artifacts:
   - `output/web-game/verify-ui-skill-pass/start-overlay.png`
   - `output/web-game/verify-ui-skill-pass/wind-skill-hud.png`
@@ -1016,7 +1016,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 
 ## Verification: fixes + skill-lab
 - Syntax:
-  - `node --check D:\tryings\vibecoding\emoji-survivors\app.js`
+  - `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js`
 - Targeted verification artifacts:
   - `output/web-game/verify-fixes-pass/frost-start.png`
   - `output/web-game/verify-fixes-pass/end-run-summary.png`
@@ -1056,7 +1056,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
   - bosses already killed 3 times are excluded.
 
 ## Verification run (soft VFX / random boss pass)
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Targeted browser verification:
   - `output/web-game/verify-soft-vfx-random-boss/skill-lab-soft-vfx.png`
   - `output/web-game/verify-soft-vfx-random-boss/fire-pickup-collect.png`
@@ -1096,7 +1096,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
   - utility buttons span full width.
 
 ## Verification run (manual skill lab / soft VFX)
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Targeted verification:
   - `output/web-game/verify-soft-vfx-lab-pass/lab-manual-casts.png`
   - `output/web-game/verify-soft-vfx-lab-pass/lab-extra-dummy.png`
@@ -1274,7 +1274,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - Made skill particles blurrier by softening radial particle helpers and spark/ember rendering.
 
 ## Latest verification
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Visual validation:
   - `output/web-game/verify-vfx-opacity-pass/fire-shot-0.png`
   - `output/web-game/verify-vfx-opacity-pass-frost/shot-0.png`
@@ -1286,7 +1286,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - Reduced `Crystal Spear` render size again to keep the frost ultimate readable without dominating the screen.
 
 ## Latest verification
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Fresh frost validation:
   - `output/web-game/verify-vfx-opacity-pass-frost-2/shot-0.png`
   - `output/web-game/verify-vfx-opacity-pass-frost-2/state-0.json`
@@ -1298,7 +1298,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
 - Reduced `Crystal Spear` render size again after the density boost.
 
 ## Latest verification
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Fresh frost capture:
   - `output/web-game/verify-vfx-opacity-pass-frost-3/shot-0.png`
   - `output/web-game/verify-vfx-opacity-pass-frost-3/state-0.json`
@@ -1312,7 +1312,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
   - `blood-rite` now has animated crystal rotation and internal radial streaks.
 
 ## Latest verification
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - Wind lane visual check:
   - `output/web-game/verify-layer-wind-strip/shot-0.png`
   - `output/web-game/verify-layer-wind-strip/state-0.json`
@@ -1373,7 +1373,7 @@ Original prompt: [@game-studio](plugin://game-studio@openai-curated)
   - progression cadence targets
 
 ## Latest verification
-- `node --check D:\tryings\vibecoding\emoji-survivors\app.js` passes.
+- `node --check D:\tryings\vibecoding\Games\emoji-survivors\app.js` passes.
 - `npm run playtest:smoke -- --out output/web-game/playtest-smoke-balance` passes.
 - Deterministic boss/enemy verification:
   - `node verify-boss-random-balance.mjs`

@@ -5,13 +5,13 @@ import path from 'node:path';
 const require = createRequire(import.meta.url);
 const { chromium } = require('C:/Users/san day/.codex/node_modules/playwright');
 
-const root = 'D:/tryings/vibecoding/emoji-survivors';
+const root = 'D:\tryings\vibecoding\Games\emoji-survivors';
 const outDir = path.join(root, 'output/web-game/verify-terrain-pickups-pathing');
 await fs.mkdir(outDir, { recursive: true });
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-await page.goto('file:///D:/tryings/vibecoding/emoji-survivors/index.html');
+await page.goto('file:///D:\tryings\vibecoding\Games\emoji-survivors/index.html');
 await page.waitForTimeout(220);
 await page.evaluate(() => window.advanceTime(500));
 

@@ -6,9 +6,9 @@ Purpose: redesign the 5 player classes so they are more mechanically exclusive, 
 
 Primary implementation targets:
 
-- [game-config.js](D:/tryings/vibecoding/emoji-survivors/game-config.js)
-- [game/runtime.js](D:/tryings/vibecoding/emoji-survivors/game/runtime.js)
-- verification scripts under [scripts/verify](D:/tryings/vibecoding/emoji-survivors/scripts/verify)
+- [game-config.js](D:\tryings\vibecoding\Games\emoji-survivors/game-config.js)
+- [game/runtime.js](D:\tryings\vibecoding\Games\emoji-survivors/game/runtime.js)
+- verification scripts under [scripts/verify](D:\tryings\vibecoding\Games\emoji-survivors/scripts/verify)
 
 This spec is written so another model or engineer can implement it in order with minimal interpretation.
 
@@ -1279,8 +1279,8 @@ Preferred mastery bias:
 
 Extend or add checks in:
 
-- [scripts/verify/verify-class-behavior.mjs](D:/tryings/vibecoding/emoji-survivors/scripts/verify/verify-class-behavior.mjs)
-- optionally [scripts/verify/verify-class-overhaul.mjs](D:/tryings/vibecoding/emoji-survivors/scripts/verify/verify-class-overhaul.mjs)
+- [scripts/verify/verify-class-behavior.mjs](D:\tryings\vibecoding\Games\emoji-survivors/scripts/verify/verify-class-behavior.mjs)
+- optionally [scripts/verify/verify-class-overhaul.mjs](D:\tryings\vibecoding\Games\emoji-survivors/scripts/verify/verify-class-overhaul.mjs)
 
 Recommended assertions:
 
