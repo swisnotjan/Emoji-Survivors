@@ -2,12 +2,12 @@ import { chromium } from 'file:///C:/Users/san%20day/.codex/node_modules/playwri
 import fs from 'fs/promises';
 import path from 'path';
 
-const outDir = 'D:/tryings/vibecoding/emoji-survivors/output/web-game/verify-soft-vfx-lab-pass';
+const outDir = 'D:\tryings\vibecoding\Games\emoji-survivors/output/web-game/verify-soft-vfx-lab-pass';
 await fs.mkdir(outDir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1600, height: 960 } });
 
-await page.goto('file:///D:/tryings/vibecoding/emoji-survivors/skill-lab.html');
+await page.goto('file:///D:\tryings\vibecoding\Games\emoji-survivors/skill-lab.html');
 await page.waitForTimeout(1400);
 const initial = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
 await page.click('[data-skill-slot="1"]');
@@ -24,7 +24,7 @@ await page.waitForTimeout(120);
 const afterExtraDummy = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
 await page.screenshot({ path: path.join(outDir, 'lab-extra-dummy.png') });
 
-await page.goto('file:///D:/tryings/vibecoding/emoji-survivors/index.html');
+await page.goto('file:///D:\tryings\vibecoding\Games\emoji-survivors/index.html');
 await page.waitForTimeout(120);
 await page.evaluate(() => { window.debug_game.unlockAllClasses(); window.debug_game.selectClass('fire'); window.debug_game.startRun(); window.debug_game.setSpawningEnabled(false); window.debug_game.grantXp(1000); });
 await page.waitForTimeout(200);

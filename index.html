@@ -5,20 +5,73 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Emoji Survivors</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="game-root">
       <canvas id="gameCanvas" width="960" height="540" aria-label="Game Field"></canvas>
+      <div id="audioMixer" class="audio-mixer" aria-label="Audio controls">
+        <button id="audioMixerButton" class="audio-mixer-button" type="button" aria-label="Open audio controls" data-no-ui-click="true">
+          🔊
+        </button>
+        <div id="audioMixerPanel" class="audio-mixer-panel" role="group" aria-label="Audio mixer">
+          <div class="audio-mixer-row">
+            <button id="musicMuteButton" class="audio-emoji-button" type="button" aria-label="Toggle music">
+              🎵
+              <span class="audio-emoji-cross" aria-hidden="true">✕</span>
+            </button>
+            <input id="musicVolumeSlider" class="audio-slider" type="range" min="0" max="100" step="1" value="70" aria-label="Music volume" />
+          </div>
+          <div class="audio-mixer-row">
+            <button id="sfxMuteButton" class="audio-emoji-button" type="button" aria-label="Toggle sound effects">
+              🔔
+              <span class="audio-emoji-cross" aria-hidden="true">✕</span>
+            </button>
+            <input id="sfxVolumeSlider" class="audio-slider" type="range" min="0" max="100" step="1" value="55" aria-label="Effects volume" />
+          </div>
+        </div>
+      </div>
 
       <div id="startOverlay" class="overlay start-overlay">
         <div class="overlay-card start-card">
-          <p class="overlay-title start-kicker">Mage Archive</p>
-          <h1 class="start-title">Choose Your Mage</h1>
-          <p id="startSubtitle" class="start-subtitle">Unlock classes in sequence by collecting XP and hunting specific enemies.</p>
-          <div id="classSelectGrid" class="class-select-grid"></div>
-          <div id="classProgressCard" class="class-progress-card"></div>
-          <div id="archiveProgressCard" class="archive-progress-card"></div>
+          <div class="start-header">
+            <div class="start-logo">
+              <img class="start-logo-image" src="assets/start-logo.png" alt="Emoji Survivors" />
+            </div>
+            <p id="startSubtitle" class="start-subtitle">Survive the horde, evolve your build, and erase the map with spellcraft.</p>
+          </div>
+          <div class="start-layout">
+            <section class="start-panel start-mage-panel" aria-label="Mage selection">
+              <div class="start-panel-head">
+                <p class="start-panel-kicker">Choose Your Mage</p>
+                <span class="start-panel-orbit" aria-hidden="true">&#x2726;</span>
+              </div>
+              <div class="mage-selector">
+                <button id="classPreviewPrev" class="mage-switch-button" type="button" aria-label="Previous mage">&#x2039;</button>
+                <div class="mage-preview-core">
+                  <div class="mage-preview-hero-wrap">
+                    <div id="classPreviewHero" class="mage-preview-hero" aria-live="polite">&#x1F9D9;&#xFE0F;</div>
+                  </div>
+                  <div id="classPreviewSkills" class="mage-preview-skills"></div>
+                </div>
+                <button id="classPreviewNext" class="mage-switch-button" type="button" aria-label="Next mage">&#x203A;</button>
+              </div>
+              <div id="classThumbStrip" class="class-thumb-strip"></div>
+              <div id="classSelectGrid" class="class-select-grid hidden">
+              </div>
+              <div id="classProgressCard" class="class-progress-card"></div>
+            </section>
+            <section class="start-panel start-achievements-panel" aria-label="Achievements">
+              <div class="start-panel-head">
+                <p class="start-panel-kicker">Achievements</p>
+                <span class="start-panel-orbit" aria-hidden="true">&#x25C8;</span>
+              </div>
+              <div id="archiveProgressCard" class="archive-progress-card"></div>
+            </section>
+          </div>
           <div class="start-actions">
             <button id="startRunButton" type="button">Start Run</button>
           </div>
@@ -45,7 +98,11 @@
         <div id="bossPhaseTracks" class="boss-phase-stacks"></div>
       </div>
 
-      <button id="upgradesButton" class="upgrades-button" type="button">
+      <button id="helpButton" class="help-button hud-corner-button" type="button" aria-label="How to play">
+        <span class="hud-corner-icon">?</span>
+        <span class="button-hotkey">H</span>
+      </button>
+      <button id="upgradesButton" class="upgrades-button hud-corner-button" type="button">
         <span class="upgrades-button-label">&#x1F4DC; Upgrades</span>
         <span class="button-hotkey">Tab</span>
       </button>
@@ -164,6 +221,77 @@
           <h2 id="bossRewardTitle">Legendary Blessing</h2>
           <p id="bossRewardSubtitle" class="levelup-subtitle">Choose one legendary blessing</p>
           <div id="bossRewardOptions" class="upgrade-options boss-reward-options"></div>
+        </div>
+      </div>
+
+      <div id="howToPlayOverlay" class="overlay hidden howto-overlay">
+        <div class="howto-panel">
+          <div class="howto-head">
+            <div>
+              <p class="menu-kicker">How to Play</p>
+              <h2>Survive the Map</h2>
+            </div>
+            <button id="closeHowToButton" class="pause-button pause-button-accent" type="button">Got it</button>
+          </div>
+          <div class="howto-grid">
+            <div class="howto-control">
+              <div class="key-cluster key-cluster-wasd" aria-hidden="true">
+                <span></span>
+                <kbd>W</kbd>
+                <span></span>
+                <kbd>A</kbd>
+                <kbd>S</kbd>
+                <kbd>D</kbd>
+              </div>
+              <div>
+                <strong>Move</strong>
+                <span>Dodge enemies and steer toward XP.</span>
+              </div>
+            </div>
+            <div class="howto-control">
+              <div class="key-cluster key-cluster-arrows" aria-hidden="true">
+                <span></span>
+                <kbd>&uarr;</kbd>
+                <span></span>
+                <kbd>&larr;</kbd>
+                <kbd>&darr;</kbd>
+                <kbd>&rarr;</kbd>
+              </div>
+              <div>
+                <strong>Move</strong>
+                <span>Arrow keys work too.</span>
+              </div>
+            </div>
+            <div class="howto-control howto-control-wide">
+              <div class="key-row" aria-hidden="true">
+                <kbd class="key-wide">Space</kbd>
+                <kbd class="key-wide">Shift</kbd>
+              </div>
+              <div>
+                <strong>Dash</strong>
+                <span>Break through danger with a short invulnerable burst.</span>
+              </div>
+            </div>
+            <div class="howto-control">
+              <div class="key-row" aria-hidden="true">
+                <kbd>Tab</kbd>
+              </div>
+              <div>
+                <strong>Upgrades</strong>
+                <span>Open your codex and check the current build.</span>
+              </div>
+            </div>
+            <div class="howto-control">
+              <div class="key-row" aria-hidden="true">
+                <kbd>H</kbd>
+              </div>
+              <div>
+                <strong>Help</strong>
+                <span>Show this guide again during a run.</span>
+              </div>
+            </div>
+          </div>
+          <p class="howto-note">Attacks and class skills fire automatically. Level up, choose upgrades, and defeat bosses for legendary rewards.</p>
         </div>
       </div>
 
@@ -327,6 +455,7 @@
     </div>
 
     <script src="game-config.js"></script>
+    <script src="game/audio.js"></script>
     <script src="game/foundation.js"></script>
     <script src="game/runtime.js"></script>
     <script src="game/render.js"></script>

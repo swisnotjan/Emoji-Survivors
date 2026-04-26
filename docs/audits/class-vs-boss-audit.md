@@ -8,10 +8,10 @@ This document audits the current five classes against the active boss roster und
 
 Inputs used:
 
-- class baselines from [game-config.js](D:\tryings\vibecoding\emoji-survivors\game-config.js)
-- boss stats and unlock windows from [game-config.js](D:\tryings\vibecoding\emoji-survivors\game-config.js)
-- skill roles and cooldown cadence from [game-config.js](D:\tryings\vibecoding\emoji-survivors\game-config.js)
-- enemy and boss behavior from [app.js](D:\tryings\vibecoding\emoji-survivors\app.js)
+- class baselines from [game-config.js](D:\tryings\vibecoding\Games\emoji-survivors\game-config.js)
+- boss stats and unlock windows from [game-config.js](D:\tryings\vibecoding\Games\emoji-survivors\game-config.js)
+- skill roles and cooldown cadence from [game-config.js](D:\tryings\vibecoding\Games\emoji-survivors\game-config.js)
+- enemy and boss behavior from [app.js](D:\tryings\vibecoding\Games\emoji-survivors\app.js)
 
 External references:
 

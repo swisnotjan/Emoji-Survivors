@@ -2,12 +2,12 @@ import { chromium } from 'file:///C:/Users/san%20day/.codex/node_modules/playwri
 import fs from 'fs/promises';
 import path from 'path';
 
-const outDir = 'D:/tryings/vibecoding/emoji-survivors/output/web-game/verify-class-behavior';
+const outDir = 'D:\tryings\vibecoding\Games\emoji-survivors/output/web-game/verify-class-behavior';
 await fs.mkdir(outDir, { recursive: true });
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-const url = 'file:///D:/tryings/vibecoding/emoji-survivors/index.html';
+const url = 'file:///D:\tryings\vibecoding\Games\emoji-survivors/index.html';
 
 async function readState() {
   return JSON.parse(await page.evaluate(() => window.render_game_to_text()));

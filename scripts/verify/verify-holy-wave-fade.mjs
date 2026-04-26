@@ -1,11 +1,11 @@
 import { chromium } from 'file:///C:/Users/san%20day/.codex/node_modules/playwright/index.mjs';
 import fs from 'fs/promises';
 import path from 'path';
-const outDir = 'D:/tryings/vibecoding/emoji-survivors/output/web-game/verify-holy-wave-fade';
+const outDir = 'D:\tryings\vibecoding\Games\emoji-survivors/output/web-game/verify-holy-wave-fade';
 await fs.mkdir(outDir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1600, height: 960 } });
-await page.goto('file:///D:/tryings/vibecoding/emoji-survivors/index.html');
+await page.goto('file:///D:\tryings\vibecoding\Games\emoji-survivors/index.html');
 await page.evaluate(() => { window.debug_game.unlockAllClasses(); window.debug_game.selectClass('fire'); window.debug_game.startRun(); window.debug_game.setSpawningEnabled(false); window.debug_game.grantXp(1000); });
 await page.waitForTimeout(250);
 await page.keyboard.press('Digit1');

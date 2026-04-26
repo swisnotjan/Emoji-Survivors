@@ -4,7 +4,7 @@ import path from 'path';
 import http from 'http';
 import { spawn } from 'child_process';
 
-const root = 'D:/tryings/vibecoding/emoji-survivors';
+const root = 'D:\tryings\vibecoding\Games\emoji-survivors';
 const outDir = path.join(root, 'output/web-game/verify-class-boss-focus');
 await fs.mkdir(outDir, { recursive: true });
 

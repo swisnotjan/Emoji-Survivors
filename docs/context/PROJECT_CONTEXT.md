@@ -11,7 +11,7 @@ Current live repo:
 
 Primary local project path:
 
-- [D:\tryings\vibecoding\emoji-survivors](D:\tryings\vibecoding\emoji-survivors)
+- [D:\tryings\vibecoding\Games\emoji-survivors](D:\tryings\vibecoding\Games\emoji-survivors)
 
 The game started as a compact Vampire Survivors-inspired prototype and has since evolved into a multi-class action-survivor with:
 
@@ -58,16 +58,16 @@ Runtime:
 
 Files:
 
-- main game logic: [app.js](D:\tryings\vibecoding\emoji-survivors\app.js)
-- data/tuning config: [game-config.js](D:\tryings\vibecoding\emoji-survivors\game-config.js)
-- page shell: [index.html](D:\tryings\vibecoding\emoji-survivors\index.html)
-- styles: [styles.css](D:\tryings\vibecoding\emoji-survivors\styles.css)
+- main game logic: [app.js](D:\tryings\vibecoding\Games\emoji-survivors\app.js)
+- data/tuning config: [game-config.js](D:\tryings\vibecoding\Games\emoji-survivors\game-config.js)
+- page shell: [index.html](D:\tryings\vibecoding\Games\emoji-survivors\index.html)
+- styles: [styles.css](D:\tryings\vibecoding\Games\emoji-survivors\styles.css)
 
 Local tooling:
 
-- static server: [scripts\serve-static.mjs](D:\tryings\vibecoding\emoji-survivors\scripts\serve-static.mjs)
-- Pages build prep: [scripts\prepare-pages.mjs](D:\tryings\vibecoding\emoji-survivors\scripts\prepare-pages.mjs)
-- local playtest runner: [scripts\run-playtest.mjs](D:\tryings\vibecoding\emoji-survivors\scripts\run-playtest.mjs)
+- static server: [scripts\serve-static.mjs](D:\tryings\vibecoding\Games\emoji-survivors\scripts\serve-static.mjs)
+- Pages build prep: [scripts\prepare-pages.mjs](D:\tryings\vibecoding\Games\emoji-survivors\scripts\prepare-pages.mjs)
+- local playtest runner: [scripts\run-playtest.mjs](D:\tryings\vibecoding\Games\emoji-survivors\scripts\run-playtest.mjs)
 
 Package scripts:
 
@@ -131,7 +131,7 @@ Important design decision:
 Important fix already made:
 
 - if stored unlock progress already satisfies the next class requirements, the game now reconciles and unlocks that class immediately on load/save
-- this logic lives in `reconcileMetaUnlocks(meta)` in [app.js](D:\tryings\vibecoding\emoji-survivors\app.js)
+- this logic lives in `reconcileMetaUnlocks(meta)` in [app.js](D:\tryings\vibecoding\Games\emoji-survivors\app.js)
 
 ### 2. Run Progression
 
@@ -238,7 +238,7 @@ Boss HUD:
 Important bug that was already fixed:
 
 - phase changes previously crashed render because `drawEnemies()` referenced missing `BOSS_THEME_COLORS`
-- this is fixed in [app.js](D:\tryings\vibecoding\emoji-survivors\app.js)
+- this is fixed in [app.js](D:\tryings\vibecoding\Games\emoji-survivors\app.js)
 
 ### 6. Skill System
 
@@ -364,9 +364,9 @@ This is central to future balancing work.
 
 ## Data Separation and Config
 
-The project originally had too much balancing data hardcoded in [app.js](D:\tryings\vibecoding\emoji-survivors\app.js).
+The project originally had too much balancing data hardcoded in [app.js](D:\tryings\vibecoding\Games\emoji-survivors\app.js).
 
-It was partially moved into [game-config.js](D:\tryings\vibecoding\emoji-survivors\game-config.js).
+It was partially moved into [game-config.js](D:\tryings\vibecoding\Games\emoji-survivors\game-config.js).
 
 What is already in config:
 
@@ -453,7 +453,7 @@ This is deliberate because:
 
 Separate page:
 
-- [skill-lab.html](D:\tryings\vibecoding\emoji-survivors\skill-lab.html)
+- [skill-lab.html](D:\tryings\vibecoding\Games\emoji-survivors\skill-lab.html)
 
 Purpose:
 
@@ -477,14 +477,14 @@ Main runtime smoke:
 
 There are many focused verification scripts in repo root, for example:
 
-- [verify-boss-random-balance.mjs](D:\tryings\vibecoding\emoji-survivors\verify-boss-random-balance.mjs)
-- [verify-major-scaling.mjs](D:\tryings\vibecoding\emoji-survivors\verify-major-scaling.mjs)
-- [verify-telemetry-balance.mjs](D:\tryings\vibecoding\emoji-survivors\verify-telemetry-balance.mjs)
-- [verify-class-behavior.mjs](D:\tryings\vibecoding\emoji-survivors\verify-class-behavior.mjs)
+- [verify-boss-random-balance.mjs](D:\tryings\vibecoding\Games\emoji-survivors\verify-boss-random-balance.mjs)
+- [verify-major-scaling.mjs](D:\tryings\vibecoding\Games\emoji-survivors\verify-major-scaling.mjs)
+- [verify-telemetry-balance.mjs](D:\tryings\vibecoding\Games\emoji-survivors\verify-telemetry-balance.mjs)
+- [verify-class-behavior.mjs](D:\tryings\vibecoding\Games\emoji-survivors\verify-class-behavior.mjs)
 
 Artifacts are written under:
 
-- [output\web-game](D:\tryings\vibecoding\emoji-survivors\output\web-game)
+- [output\web-game](D:\tryings\vibecoding\Games\emoji-survivors\output\web-game)
 
 Important caveat:
 
@@ -494,7 +494,7 @@ Important caveat:
 
 GitHub Pages is configured through:
 
-- [deploy-pages.yml](D:\tryings\vibecoding\emoji-survivors\.github\workflows\deploy-pages.yml)
+- [deploy-pages.yml](D:\tryings\vibecoding\Games\emoji-survivors\.github\workflows\deploy-pages.yml)
 
 Pages build process:
 
@@ -515,8 +515,8 @@ This prevents test artifacts and local tooling from leaking into the public site
 
 There are two important git contexts:
 
-1. parent workspace repo at `D:\tryings\vibecoding`
-2. dedicated game repo at `D:\tryings\vibecoding\emoji-survivors`
+1. parent workspace repo at `D:\tryings\vibecoding\Games`
+2. dedicated game repo at `D:\tryings\vibecoding\Games\emoji-survivors`
 
 The game now has its own `.git` directory and is pushed independently to GitHub.
 
@@ -524,7 +524,7 @@ Important environment quirk encountered:
 
 - this machine sometimes triggers git `dubious ownership` checks on the project path
 - commands were often run with:
-  - `git -c safe.directory=D:/tryings/vibecoding/emoji-survivors ...`
+  - `git -c safe.directory=D:\tryings\vibecoding\Games\emoji-survivors ...`
 
 If git starts acting inconsistent again, check safe-directory handling first.
 
@@ -626,35 +626,35 @@ If you are debugging a specific topic, start here:
 
 ### Core runtime
 
-- [app.js](D:\tryings\vibecoding\emoji-survivors\app.js)
+- [app.js](D:\tryings\vibecoding\Games\emoji-survivors\app.js)
 
 ### Data and balancing
 
-- [game-config.js](D:\tryings\vibecoding\emoji-survivors\game-config.js)
-- [balance-audit.md](D:\tryings\vibecoding\emoji-survivors\balance-audit.md)
-- [class-vs-boss-audit.md](D:\tryings\vibecoding\emoji-survivors\class-vs-boss-audit.md)
+- [game-config.js](D:\tryings\vibecoding\Games\emoji-survivors\game-config.js)
+- [balance-audit.md](D:\tryings\vibecoding\Games\emoji-survivors\balance-audit.md)
+- [class-vs-boss-audit.md](D:\tryings\vibecoding\Games\emoji-survivors\class-vs-boss-audit.md)
 
 ### Project history / context
 
-- [progress.md](D:\tryings\vibecoding\emoji-survivors\progress.md)
-- [research.md](D:\tryings\vibecoding\emoji-survivors\research.md)
-- [dev-retrospective.md](D:\tryings\vibecoding\emoji-survivors\dev-retrospective.md)
+- [progress.md](D:\tryings\vibecoding\Games\emoji-survivors\progress.md)
+- [research.md](D:\tryings\vibecoding\Games\emoji-survivors\research.md)
+- [dev-retrospective.md](D:\tryings\vibecoding\Games\emoji-survivors\dev-retrospective.md)
 
 ### Deployment
 
-- [package.json](D:\tryings\vibecoding\emoji-survivors\package.json)
-- [deploy-pages.yml](D:\tryings\vibecoding\emoji-survivors\.github\workflows\deploy-pages.yml)
-- [prepare-pages.mjs](D:\tryings\vibecoding\emoji-survivors\scripts\prepare-pages.mjs)
+- [package.json](D:\tryings\vibecoding\Games\emoji-survivors\package.json)
+- [deploy-pages.yml](D:\tryings\vibecoding\Games\emoji-survivors\.github\workflows\deploy-pages.yml)
+- [prepare-pages.mjs](D:\tryings\vibecoding\Games\emoji-survivors\scripts\prepare-pages.mjs)
 
 ### UI
 
-- [index.html](D:\tryings\vibecoding\emoji-survivors\index.html)
-- [styles.css](D:\tryings\vibecoding\emoji-survivors\styles.css)
+- [index.html](D:\tryings\vibecoding\Games\emoji-survivors\index.html)
+- [styles.css](D:\tryings\vibecoding\Games\emoji-survivors\styles.css)
 
 ### Manual VFX / skill testing
 
-- [skill-lab.html](D:\tryings\vibecoding\emoji-survivors\skill-lab.html)
-- [skill-lab-bootstrap.js](D:\tryings\vibecoding\emoji-survivors\skill-lab-bootstrap.js)
+- [skill-lab.html](D:\tryings\vibecoding\Games\emoji-survivors\skill-lab.html)
+- [skill-lab-bootstrap.js](D:\tryings\vibecoding\Games\emoji-survivors\skill-lab-bootstrap.js)
 
 ## Recommended Next Steps
 

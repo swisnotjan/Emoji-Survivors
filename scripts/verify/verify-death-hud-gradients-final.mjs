@@ -4,7 +4,7 @@ import { chromium } from "file:///C:/Users/san%20day/.codex/node_modules/playwri
 
 const outDir = path.resolve("output/web-game/verify-death-hud-gradients-final");
 fs.mkdirSync(outDir, { recursive: true });
-const url = "file:///D:/tryings/vibecoding/emoji-survivors/index.html";
+const url = "file:///D:\tryings\vibecoding\Games\emoji-survivors/index.html";
 
 const browser = await chromium.launch({ headless: true });
 
