@@ -4450,6 +4450,18 @@ kbd {
   border-radius: var(--pixel-radius);
 }
 
+.start-panel-orbit,
+.class-thumb-icon-bg,
+.class-hover-index,
+.archive-progress-kicker,
+.archive-progress-chip,
+.class-progress-chip,
+.class-thumb-chip,
+.mage-skill-slot,
+.archive-progress-badge {
+  border-radius: var(--pixel-radius);
+}
+
 .touch-joystick-ring {
   background:
     linear-gradient(180deg, rgba(67, 80, 173, 0.82), rgba(21, 25, 63, 0.92)),
