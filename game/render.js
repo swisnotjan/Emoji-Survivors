@@ -653,6 +653,7 @@ function getAttackTelegraphProgress(attack) {
 }
 
 function drawEnemyTelegraphs() {
+  const perfTier = getPerformanceTier();
   ctx.save();
   for (const attack of state.enemyAttacks) {
     if (attack.dead || !(attack.telegraphTime > 0)) {
@@ -665,15 +666,15 @@ function drawEnemyTelegraphs() {
     }
 
     if (attack.kind === "beam") {
-      drawBeamTelegraph(attack, pos, worldToScreen(attack.x2, attack.y2));
+      drawBeamTelegraph(attack, pos, worldToScreen(attack.x2, attack.y2), perfTier);
     } else {
-      drawCircularTelegraph(attack, pos);
+      drawCircularTelegraph(attack, pos, perfTier);
     }
   }
   ctx.restore();
 }
 
-function drawCircularTelegraph(attack, pos) {
+function drawCircularTelegraph(attack, pos, perfTier = 0) {
   const radius = attack.radius ?? attack.maxRadius ?? 24;
   const telegraph = getAttackTelegraphProgress(attack);
   const fillRadius = radius * (0.16 + telegraph.fill * 0.84);
@@ -704,7 +705,7 @@ function drawCircularTelegraph(attack, pos) {
 
   ctx.save();
   ctx.lineCap = "round";
-  ctx.shadowBlur = 16 + telegraph.fill * 14;
+  ctx.shadowBlur = perfTier >= 2 ? 0 : 16 + telegraph.fill * 14;
   ctx.shadowColor = colorWithAlpha(attack.color, 0.16 + telegraph.fill * 0.22);
   ctx.strokeStyle = colorWithAlpha(attack.color, 0.42 + telegraph.fill * 0.32);
   ctx.lineWidth = 3.2 + telegraph.fill * 2.6;
@@ -724,7 +725,7 @@ function drawCircularTelegraph(attack, pos) {
   ctx.restore();
 }
 
-function drawBeamTelegraph(attack, start, end) {
+function drawBeamTelegraph(attack, start, end, perfTier = 0) {
   const telegraph = getAttackTelegraphProgress(attack);
   const beamWidth = attack.width * (0.32 + telegraph.fill * 0.36);
   const dashOffset = -state.elapsed * (180 + telegraph.fill * 190);
@@ -762,7 +763,7 @@ function drawBeamTelegraph(attack, start, end) {
 
   ctx.save();
   ctx.lineCap = "round";
-  ctx.shadowBlur = 18 + telegraph.fill * 12;
+  ctx.shadowBlur = perfTier >= 2 ? 0 : 18 + telegraph.fill * 12;
   ctx.shadowColor = colorWithAlpha(attack.color, 0.18 + telegraph.fill * 0.22);
   ctx.strokeStyle = colorWithAlpha(attack.color, 0.48 + telegraph.fill * 0.24);
   ctx.lineWidth = attack.width * (0.2 + telegraph.fill * 0.12);
@@ -2403,9 +2404,11 @@ function drawEnemies() {
 
       ctx.save();
       const hueRotate = status.key === "wind" ? 0 : status.hue;
-      ctx.filter = `saturate(1.18) hue-rotate(${hueRotate}deg) brightness(${1.04 + auraStrength * 0.08})`;
-      ctx.shadowBlur = 18;
-      ctx.shadowColor = tintAlpha(status.aura, 0.2 + auraStrength * 0.35);
+      if (perfTier === 0) {
+        ctx.filter = `saturate(1.18) hue-rotate(${hueRotate}deg) brightness(${1.04 + auraStrength * 0.08})`;
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = tintAlpha(status.aura, 0.2 + auraStrength * 0.35);
+      }
       if (jumpScale !== 1) {
         ctx.translate(drawX, drawY + 1);
         ctx.scale(jumpScale, jumpScale);
@@ -2419,7 +2422,7 @@ function drawEnemies() {
       }
       ctx.restore();
     } else {
-      if (enemy.isBoss && enemy.phase >= 2 && perfTier < 2) {
+      if (enemy.isBoss && enemy.phase >= 2 && perfTier === 0) {
         ctx.save();
         ctx.filter = "saturate(1.18) brightness(1.1)";
         ctx.shadowBlur = 20;
@@ -2622,8 +2625,10 @@ function drawBossIntroBanner() {
   grad.addColorStop(0.55, "rgba(255, 236, 194, 0.98)");
   grad.addColorStop(1, "rgba(255, 168, 110, 0.94)");
   ctx.fillStyle = grad;
-  ctx.shadowBlur = 28 + pulse * 18;
-  ctx.shadowColor = "rgba(255, 161, 110, 0.62)";
+  if (getPerformanceTier() < 2) {
+    ctx.shadowBlur = 28 + pulse * 18;
+    ctx.shadowColor = "rgba(255, 161, 110, 0.62)";
+  }
   ctx.font = '800 18px "Trebuchet MS", "Segoe UI", sans-serif';
   ctx.fillText("BOSS APPROACHING", viewWidth * 0.5, y - 28);
   ctx.font = '900 48px "Trebuchet MS", "Segoe UI", sans-serif';
