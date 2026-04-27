@@ -91,26 +91,22 @@ function createInitialState(classId = "wind") {
       afterDashPower: 0,
       afterDashBuffTimer: 0,
       windRushTimer: 0,
-      windRushBonus: classId === "wind" ? 0.18 : 0,
+      windRushBonus: classId === "wind" ? 0.28 : 0,
       bloodRiteTimer: 0,
-      lifesteal: classId === "blood" ? 0.08 : 0,
+      lifesteal: classId === "blood" ? 0.03 : 0,
       bloodGuardTimer: 0,
       bloodStandReduction: classId === "blood" ? 0.08 : 0,
       bloodPoolReduction: classId === "blood" ? 0.1 : 0,
       bloodRiteReduction: classId === "blood" ? 0.16 : 0,
       bloodMarkedReduction: classId === "blood" ? 0.03 : 0,
-      bloodCloseRangeBonus: classId === "blood" ? 0.05 : 0,
-      bloodRiteLifestealBonus: classId === "blood" ? 0.06 : 0,
-      frostCritChance: classId === "frost" ? 0.02 : 0,
-      frostCritMultiplier: classId === "frost" ? 1.85 : 1.5,
-      frostChilledCritBonus: classId === "frost" ? 0.14 : 0,
-      frostFrozenCritBonus: classId === "frost" ? 0.18 : 0,
-      frostBrittleCritBonus: classId === "frost" ? 0.26 : 0,
+      bloodCloseRangeBonus: classId === "blood" ? 0.06 : 0,
+      bloodRiteLifestealBonus: classId === "blood" ? 0.10 : 0,
+      frozenDamageMultiplier: classId === "frost" ? 3.0 : 1.0,
       lastCritTimer: 0,
       lastCritSource: null,
       thrallLifestealPerHit: 0,
-      necroSummonCap: classId === "necro" ? 9 : 0,
-      necroRaiseChanceBonus: classId === "necro" ? 0.18 : 0,
+      necroSummonCap: classId === "necro" ? 6 : 0,
+      necroRaiseChanceBonus: classId === "necro" ? 0.05 : 0,
       necroSiphonHeal: 0,
       necroSiphonReduction: 0,
       necroSiphonRadius: 0,
@@ -127,8 +123,8 @@ function createInitialState(classId = "wind") {
         extraProjectiles: 0,
         spreadAngle: 0.1,
         targetingRange: 920,
-        knockback: classId === "wind" ? 320 : 34,
-        bossDamageMultiplier: classId === "wind" ? 0.9 : 1,
+        knockback: classId === "wind" ? 430 : 34,
+        bossDamageMultiplier: classId === "wind" ? 0.85 : 1,
       },
       dash: {
         charges: 1,
@@ -3047,7 +3043,8 @@ function castPlayerSkill(skillState) {
       spawnPlayerAura("gale-ring", {
         radius: 118,
         life: 1.05,
-        damage: 36,
+        damage: 3,
+        masteryDamage: 2.5,
         interval: 0.22,
         color: "rgba(176, 229, 237, {a})",
         secondaryColor: "rgba(116, 187, 214, {a})",
@@ -3058,7 +3055,7 @@ function castPlayerSkill(skillState) {
       didCast = true;
       break;
     case "crosswind-strip":
-      didCast = castCrosswindStrip();
+      didCast = castCrosswindStrip(skillState.mastery);
       break;
     case "tempest-node":
       didCast = castTempestNode(skillState.mastery);
@@ -3067,7 +3064,8 @@ function castPlayerSkill(skillState) {
       spawnPlayerAura("blizzard-wake", {
         radius: 126,
         life: 1.2,
-        damage: 18,
+        damage: 2,
+        masteryDamage: 1.5,
         interval: 0.18,
         color: "rgba(176, 228, 255, {a})",
         secondaryColor: "rgba(84, 156, 239, {a})",
@@ -3087,7 +3085,8 @@ function castPlayerSkill(skillState) {
       spawnPlayerAura("cinder-halo", {
         radius: 122,
         life: 1.05,
-        damage: 28,
+        damage: 3,
+        masteryDamage: 2.5,
         interval: 0.18,
         color: "rgba(255, 197, 84, {a})",
         secondaryColor: "rgba(232, 86, 34, {a})",
@@ -3145,7 +3144,7 @@ function spawnPlayerAura(kind, spec) {
     life: spec.life * (1 + state.player.skillDurationMultiplier),
     maxLife: spec.life * (1 + state.player.skillDurationMultiplier),
     radius: spec.radius * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: spec.damage * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
+    damage: (spec.damage + (spec.masteryDamage ?? 0) * mastery) * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
     interval: spec.interval,
     tickTimer: 0.02,
     color: spec.color,
@@ -3159,7 +3158,7 @@ function spawnPlayerAura(kind, spec) {
   return true;
 }
 
-function castCrosswindStrip() {
+function castCrosswindStrip(mastery) {
   const movement = getMovementAxis();
   const target = movement.x || movement.y ? { x: state.player.x + movement.x, y: state.player.y + movement.y } : findNearestEnemy(state.player.x, state.player.y, 720);
   if (!target) {
@@ -3178,7 +3177,7 @@ function castCrosswindStrip() {
     maxLife: 1.25 * (1 + state.player.skillDurationMultiplier),
     length: 340 * (1 + state.player.skillAreaMultiplier),
     width: 76 * (1 + state.player.skillAreaMultiplier),
-    damage: 20 * state.player.skillDamageMultiplier,
+    damage: (2.5 + mastery * 2) * state.player.skillDamageMultiplier,
     interval: 0.18,
     tickTimer: 0.01,
     color: "rgba(236, 248, 255, {a})",
@@ -3204,7 +3203,7 @@ function castTempestNode(mastery) {
     life: 3.1 * (1 + state.player.skillDurationMultiplier) + mastery * 0.35,
     maxLife: 3.1 * (1 + state.player.skillDurationMultiplier) + mastery * 0.35,
     radius: 136 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: 16 * state.player.skillDamageMultiplier,
+    damage: (2 + mastery * 1.5) * state.player.skillDamageMultiplier,
     interval: 0.16,
     tickTimer: 0.01,
     color: "rgba(169, 230, 236, {a})",
@@ -3230,7 +3229,7 @@ function castPermafrostSeal(mastery) {
     maxLife: 2.9 * (1 + state.player.skillDurationMultiplier),
     armTime: 0.65,
     radius: 132 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: 30 * state.player.skillDamageMultiplier,
+    damage: (8 + mastery * 4) * state.player.skillDamageMultiplier,
     burstDone: false,
     color: "rgba(186, 235, 255, {a})",
     secondaryColor: "rgba(76, 156, 236, {a})",
@@ -3259,7 +3258,7 @@ function castCrystalSpear(mastery) {
     vy: (dy / length) * (620 + mastery * 40),
     radius: 6.2,
     renderRadius: 48,
-    damage: (92 + mastery * 18) * state.player.skillDamageMultiplier,
+    damage: (22 + mastery * 16) * state.player.skillDamageMultiplier,
     life: 1.35,
     pierce: 2 + mastery,
     color: "#dff6ff",
@@ -3284,7 +3283,7 @@ function castSunspot(mastery) {
     life: 3.4 * (1 + state.player.skillDurationMultiplier) + mastery * 0.3,
     maxLife: 3.4 * (1 + state.player.skillDurationMultiplier) + mastery * 0.3,
     radius: 126 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: 26 * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
+    damage: (2.5 + mastery * 2) * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
     interval: 0.18,
     tickTimer: 0.02,
     color: "rgba(255, 201, 92, {a})",
@@ -3310,7 +3309,7 @@ function castAshComet(mastery) {
     maxLife: 1.1,
     armTime: 0.52,
     radius: 86 * (1 + state.player.skillAreaMultiplier),
-    damage: (132 + mastery * 20) * state.player.skillDamageMultiplier,
+    damage: (30 + mastery * 22) * state.player.skillDamageMultiplier,
     burstDone: false,
     color: "rgba(255, 214, 120, {a})",
     secondaryColor: "rgba(226, 72, 18, {a})",
@@ -3332,7 +3331,7 @@ function castBoneWard(mastery) {
     maxLife: 4.6 * (1 + state.player.skillDurationMultiplier) + mastery * 0.45,
     orbitCount: 4 + mastery,
     radius: 88 + mastery * 16,
-    damage: 18 * state.player.skillDamageMultiplier,
+    damage: (2 + mastery * 1) * state.player.skillDamageMultiplier,
     interval: 0.2,
     tickTimer: 0.02,
     color: "rgba(170, 239, 202, {a})",
@@ -3341,15 +3340,15 @@ function castBoneWard(mastery) {
     lightColor: "rgba(224, 255, 240, {a})",
     tailLife: 0.3,
   });
-  for (let index = 0; index < 2 + mastery; index += 1) {
+  for (let index = 0; index < 1 + mastery; index += 1) {
     spawnNecroThrall(
-      state.player.x + Math.cos((index / Math.max(1, 2 + mastery)) * Math.PI * 2) * 42,
-      state.player.y + Math.sin((index / Math.max(1, 2 + mastery)) * Math.PI * 2) * 42,
+      state.player.x + Math.cos((index / Math.max(1, 1 + mastery)) * Math.PI * 2) * 42,
+      state.player.y + Math.sin((index / Math.max(1, 1 + mastery)) * Math.PI * 2) * 42,
       {
         sourceType: "bone-ward",
-        speed: 170 + mastery * 10,
-        damage: 14 + mastery * 2,
-        life: 8.6 + mastery * 1.2,
+        speed: 160 + mastery * 8,
+        damage: 11 + mastery * 2,
+        life: 10 + mastery * 1.2,
         radius: 13,
       }
     );
@@ -3367,7 +3366,7 @@ function castRequiemField(mastery) {
     life: 4.2 * (1 + state.player.skillDurationMultiplier),
     maxLife: 4.2 * (1 + state.player.skillDurationMultiplier),
     radius: 142 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: 11 * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
+    damage: (2 + mastery * 1) * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
     interval: 0.18,
     tickTimer: 0.02,
     color: "rgba(160, 232, 198, {a})",
@@ -3396,16 +3395,16 @@ function castGraveCall(mastery) {
   });
   const nearbyCorpses = state.corpses
     .filter((corpse) => Math.hypot(corpse.x - state.player.x, corpse.y - state.player.y) < 520)
-    .slice(0, 3 + mastery);
-  const fallbackCount = Math.max(3, 3 + mastery - nearbyCorpses.length);
+    .slice(0, 1 + mastery);
+  const fallbackCount = nearbyCorpses.length === 0 ? 1 : 0;
   for (const corpse of nearbyCorpses) {
     corpse.life = 0;
     spawnNecroThrall(corpse.x, corpse.y, {
       sourceType: corpse.type,
       radius: Math.max(12, corpse.radius * 0.72),
-      speed: 172 + mastery * 10,
-      damage: 17 + mastery * 2.5,
-      life: 18 + mastery * 3,
+      speed: 160 + mastery * 8,
+      damage: 12 + mastery * 2,
+      life: 14 + mastery * 2,
     });
   }
   for (let index = 0; index < fallbackCount; index += 1) {
@@ -3415,9 +3414,9 @@ function castGraveCall(mastery) {
       state.player.y + Math.sin(angle) * randRange(24, 56),
       {
         sourceType: "phantom",
-        speed: 176 + mastery * 12,
-        damage: 15 + mastery * 2.2,
-        life: 13 + mastery * 2,
+        speed: 162 + mastery * 8,
+        damage: 10 + mastery * 2,
+        life: 11 + mastery * 2,
       }
     );
   }
@@ -3435,7 +3434,7 @@ function castVeinBurst(mastery) {
     life: 0.84,
     maxLife: 0.84,
     radius: 112 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: (62 + mastery * 10) * state.player.skillDamageMultiplier,
+    damage: (4 + mastery * 5) * state.player.skillDamageMultiplier,
     interval: 0.14,
     tickTimer: 0.01,
     color: "rgba(232, 126, 154, {a})",
@@ -3456,7 +3455,7 @@ function castCrimsonPool(mastery) {
     life: 4 * (1 + state.player.skillDurationMultiplier),
     maxLife: 4 * (1 + state.player.skillDurationMultiplier),
     radius: 132 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: 16.5 * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
+    damage: 1.5 * state.player.skillDamageMultiplier * state.player.zoneDamageMultiplier,
     interval: 0.16,
     tickTimer: 0.02,
     color: "rgba(206, 82, 116, {a})",
@@ -3527,7 +3526,7 @@ function spawnEnemies(dt) {
     return;
   }
   const director = state.spawnDirector;
-  const pressure = Math.min(1.2, state.elapsed / 195);
+  const pressure = Math.min(1.2, Math.max(0, state.elapsed - 30) / 180);
   const latePressure = Math.max(0, state.elapsed - 170) / 230;
   const bossActive = hasLivingBoss();
   let ambientEnemyCount = state.enemies.reduce(
@@ -3540,7 +3539,9 @@ function spawnEnemies(dt) {
   if (bossActive) {
     dynamicInterval *= SPAWN_DIRECTOR_CONFIG.bossSpawnIntervalMultiplier;
   }
-  const dynamicMaxEnemies = Math.round(director.maxEnemiesOnField * (1 + Math.min(0.55, latePressure * 0.34)));
+  const earlyCapScale = Math.min(1, state.elapsed / SPAWN_DIRECTOR_CONFIG.earlyCapRampTime);
+  const earlyCapBase = SPAWN_DIRECTOR_CONFIG.earlyCapMin + (director.maxEnemiesOnField - SPAWN_DIRECTOR_CONFIG.earlyCapMin) * earlyCapScale;
+  const dynamicMaxEnemies = Math.round(earlyCapBase * (1 + Math.min(0.55, latePressure * 0.34)));
   const dynamicBossAmbientCap = Math.round(SPAWN_DIRECTOR_CONFIG.bossAmbientCap * (1 + Math.min(0.4, latePressure * 0.22)));
 
   director.timer -= dt;
@@ -5490,21 +5491,31 @@ function updateAllies(dt) {
       ally.dead = true;
       continue;
     }
-    const target = findNearestEnemy(ally.x, ally.y, 860);
-    if (!target) {
-      continue;
+    const target = findNearestEnemy(ally.x, ally.y, 360);
+    let moveX, moveY;
+    if (target) {
+      const dx = target.x - ally.x;
+      const dy = target.y - ally.y;
+      const length = Math.hypot(dx, dy) || 1;
+      const drift = 0.18 * Math.sin(state.elapsed * 2.6 + ally.orbitSeed);
+      moveX = dx / length + (-dy / length) * drift;
+      moveY = dy / length + (dx / length) * drift;
+    } else {
+      const dx = state.player.x - ally.x;
+      const dy = state.player.y - ally.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 30) {
+        continue;
+      }
+      moveX = dx / dist;
+      moveY = dy / dist;
     }
-    const dx = target.x - ally.x;
-    const dy = target.y - ally.y;
-    const length = Math.hypot(dx, dy) || 1;
-    const drift = 0.18 * Math.sin(state.elapsed * 2.6 + ally.orbitSeed);
-    const moveX = dx / length + (-dy / length) * drift;
-    const moveY = dy / length + (dx / length) * drift;
+    const moveLen = Math.hypot(moveX, moveY) || 1;
     const requiemBonus = getRequiemFieldBonusAt(ally.x, ally.y);
     moveCircleEntity(
       ally,
-      (moveX / Math.hypot(moveX, moveY)) * ally.speed * requiemBonus.speedMultiplier * dt,
-      (moveY / Math.hypot(moveX, moveY)) * ally.speed * requiemBonus.speedMultiplier * dt,
+      (moveX / moveLen) * ally.speed * requiemBonus.speedMultiplier * dt,
+      (moveY / moveLen) * ally.speed * requiemBonus.speedMultiplier * dt,
       ally.radius,
       { water: false, solids: false }
     );
@@ -5705,18 +5716,18 @@ function applyEnemyChill(enemy, amount, duration) {
   enemy.slowTimer = Math.max(enemy.slowTimer, 0.5 * state.player.statusDurationMultiplier);
   setEnemyStatusFlash(enemy, "chill", 0.45);
 
-  const freezeThreshold = enemy.isBoss ? 4.6 : 3.4;
+  const freezeThreshold = enemy.isBoss ? 5.5 : 4.0;
   if (enemy.chillStacks >= freezeThreshold) {
     enemy.chillStacks = 0;
     enemy.chillDecayTimer = 0;
-    const baseFreezeDuration = enemy.isBoss ? 0.42 : 0.9;
+    const baseFreezeDuration = enemy.isBoss ? 0.55 : 1.5;
     const resistScale = enemy.isBoss ? Math.max(0.24, 1 - enemy.freezeResist) : 1;
     enemy.freezeTimer = Math.max(enemy.freezeTimer, baseFreezeDuration * (1 - enemy.controlResist) * resistScale);
     if (enemy.isBoss) {
       enemy.freezeResist = Math.min(0.72, enemy.freezeResist + 0.24);
       enemy.freezeResistTimer = 4.6;
     }
-    enemy.brittleTimer = Math.max(enemy.brittleTimer, enemy.isBoss ? 1.2 : 1.75);
+    enemy.brittleTimer = Math.max(enemy.brittleTimer, enemy.isBoss ? 1.8 : 2.5);
     enemy.slowAmount = Math.max(enemy.slowAmount, enemy.isBoss ? 0.5 : 0.95);
     enemy.slowTimer = Math.max(enemy.slowTimer, enemy.freezeTimer);
     setEnemyStatusFlash(enemy, "freeze", 0.7);
@@ -5790,33 +5801,28 @@ function computePlayerProjectileDamage(enemy, projectile) {
   if (hasAffliction(enemy)) {
     damage *= 1 + state.player.damageVsAfflicted;
   }
-  if (enemy.brittleTimer > 0) {
-    damage *= enemy.isBoss ? 1.14 : 1.28;
-  }
   if (state.player.afterDashBuffTimer > 0) {
     damage *= 1 + state.player.afterDashPower;
   }
-  let crit = false;
-  if (state.player.classId === "frost") {
-    let critChance = state.player.frostCritChance;
-    if (enemy.chillStacks > 0) {
-      critChance += state.player.frostChilledCritBonus;
-    }
-    if (enemy.freezeTimer > 0) {
-      critChance += state.player.frostFrozenCritBonus;
-    }
-    if (enemy.brittleTimer > 0) {
-      critChance += state.player.frostBrittleCritBonus;
-    }
-    if (projectile?.skillType === "crystal-spear" && enemy.brittleTimer > 0) {
-      critChance = 1;
-    }
-    if (Math.random() < critChance) {
-      const critMultiplier = projectile?.skillType === "crystal-spear" ? 2.1 : state.player.frostCritMultiplier;
-      damage *= critMultiplier;
-      crit = true;
-    }
+  if (state.player.classId === "frost" && enemy.freezeTimer > 0) {
+    damage *= state.player.frozenDamageMultiplier;
   }
+  if (state.player.classId === "fire") {
+    let burningNearby = 0;
+    visitEnemiesInRange(enemy.x, enemy.y, 220, (e) => {
+      if (!e.dead && e.id !== enemy.id && e.burnStacks > 0) burningNearby += 1;
+    });
+    damage *= 1 + Math.min(burningNearby, 10) * 0.06;
+    damage *= 1 + Math.min(enemy.burnStacks ?? 0, 8) * 0.05;
+  }
+  if (state.player.classId === "blood") {
+    let nearbyCount = 0;
+    visitEnemiesInRange(state.player.x, state.player.y, 180, (e) => {
+      if (!e.dead) nearbyCount += 1;
+    });
+    damage *= 1 + Math.min(nearbyCount, 8) * 0.06;
+  }
+  const crit = false;
   return { damage, crit };
 }
 
@@ -5953,8 +5959,8 @@ function spawnNecroThrall(x, y, spec = {}) {
     x,
     y,
     radius: spec.radius ?? 14,
-    speed: spec.speed ?? 168,
-    damage: spec.damage ?? 15,
+    speed: spec.speed ?? 140,
+    damage: spec.damage ?? 11,
     life,
     maxLife: life,
     hitCooldown: 0,
@@ -5973,17 +5979,17 @@ function maybeRaiseThrall(enemy) {
   if (activeThralls >= state.player.necroSummonCap) {
     return;
   }
-  const baseChance = enemy.type === "grunt" || enemy.type === "runner" ? 0.22 : enemy.type === "tank" ? 0.18 : 0.14;
-  const chance = baseChance + state.player.necroRaiseChanceBonus + (enemy.necroMarkTimer > 0 ? 0.18 : 0);
+  const baseChance = enemy.type === "grunt" || enemy.type === "runner" ? 0.12 : enemy.type === "tank" ? 0.08 : 0.05;
+  const chance = baseChance + state.player.necroRaiseChanceBonus + (enemy.necroMarkTimer > 0 ? 0.08 : 0);
   if (Math.random() > chance) {
     return;
   }
   spawnNecroThrall(enemy.x, enemy.y, {
     sourceType: enemy.type,
     radius: Math.max(12, enemy.radius * 0.76),
-    speed: enemy.speed * 0.88,
-    damage: 14 + enemy.radius * 0.18,
-    life: 16,
+    speed: Math.max(160, enemy.speed * 0.88),
+    damage: 10 + enemy.radius * 0.10,
+    life: 14,
   });
 }
 
@@ -6044,9 +6050,6 @@ function resolveProjectileEnemyCollisions(grid) {
 function applyHitResponse(enemy, projectile, weapon, crit = false) {
   if (projectile.skillType === "crystal-spear") {
     applyEnemyChill(enemy, enemy.isBoss ? 1.8 : 3, 2.5);
-    if (enemy.brittleTimer > 0) {
-      enemy.brittleTimer = Math.max(enemy.brittleTimer, 2.2);
-    }
   }
   const velocityLength = Math.hypot(projectile.vx, projectile.vy) || 1;
   const dirX = projectile.vx / velocityLength;
@@ -6061,7 +6064,7 @@ function applyHitResponse(enemy, projectile, weapon, crit = false) {
   }
 
   if (passiveType === "frost") {
-    applyEnemyChill(enemy, enemy.isBoss ? 1 : 1.5, 2.3);
+    applyEnemyChill(enemy, enemy.isBoss ? 1.0 : 1.6, 2.5);
   } else if (passiveType === "fire") {
     applyEnemyBurn(enemy, enemy.isBoss ? 3 : 4, 3.1);
   } else if (passiveType === "necro") {
@@ -6070,16 +6073,17 @@ function applyHitResponse(enemy, projectile, weapon, crit = false) {
     applyEnemyBloodMark(enemy);
   }
 
-  if (crit) {
-    state.player.lastCritTimer = Math.max(state.player.lastCritTimer, 0.5);
-    state.player.lastCritSource = projectile.skillType ?? "auto";
-  }
-
   if (state.player.classId === "blood") {
     const closeRange = Math.hypot(enemy.x - state.player.x, enemy.y - state.player.y) <= 182;
     const insidePool = isPointInsideEffect(state.player.x, state.player.y, "crimson-pool");
+    let crowdNearby = 0;
+    visitEnemiesInRange(state.player.x, state.player.y, 180, (e) => {
+      if (!e.dead) crowdNearby += 1;
+    });
+    const crowdLifesteal = Math.min(crowdNearby, 8) * 0.022;
     const lifestealRatio =
       state.player.lifesteal +
+      crowdLifesteal +
       (state.player.bloodRiteTimer > 0 ? state.player.bloodRiteLifestealBonus : 0) +
       (insidePool ? 0.06 : 0) +
       (closeRange ? state.player.bloodCloseRangeBonus : 0);
