@@ -38,6 +38,7 @@ function applyGameplayAccessGate() {
 }
 
 function bootstrapGame() {
+  initWin11EmojiAtlas?.();
   metaProgress = loadMetaProgress();
   telemetryStore = loadTelemetryStore();
   state = createInitialState(metaProgress.selectedClassId);

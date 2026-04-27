@@ -13,8 +13,15 @@ const MINIMAP_CACHE = {
 const MINIMAP_OBJECTIVES_CACHE = {
   html: "",
 };
+const MINIMAP_RUNTIME = {
+  centerX: null,
+  centerY: null,
+};
 
 function render() {
+  if (!state?.player) {
+    return;
+  }
   ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
   drawBackground();
   drawEffects("base");
@@ -28,6 +35,7 @@ function render() {
   drawScreenVignette();
   drawDamageNumbers();
   drawBossIndicator();
+  drawBossIntroBanner();
   drawPlayer();
 }
 
@@ -99,8 +107,10 @@ function getMiniMapBounds() {
   const worldHeight = WORLD.bottom - WORLD.top;
   const spanX = Math.min(span, worldWidth);
   const spanY = Math.min(span, worldHeight);
-  const left = clamp(state.player.x - spanX * 0.5, WORLD.left, WORLD.right - spanX);
-  const top = clamp(state.player.y - spanY * 0.5, WORLD.top, WORLD.bottom - spanY);
+  MINIMAP_RUNTIME.centerX = state.player.x;
+  MINIMAP_RUNTIME.centerY = state.player.y;
+  const left = MINIMAP_RUNTIME.centerX - spanX * 0.5;
+  const top = MINIMAP_RUNTIME.centerY - spanY * 0.5;
   return {
     left,
     top,
@@ -113,10 +123,10 @@ function ensureMiniMapCache(width, height, bounds) {
   const key = [
     width,
     height,
-    Math.round(bounds.left / 48),
-    Math.round(bounds.top / 48),
-    Math.round((bounds.right - bounds.left) / 16),
-    Math.round((bounds.bottom - bounds.top) / 16),
+    Math.round(bounds.left / 24),
+    Math.round(bounds.top / 24),
+    Math.round((bounds.right - bounds.left) / 24),
+    Math.round((bounds.bottom - bounds.top) / 24),
   ].join(":");
   if (MINIMAP_CACHE.canvas && MINIMAP_CACHE.width === width && MINIMAP_CACHE.height === height && MINIMAP_CACHE.key === key) {
     return;
@@ -131,31 +141,23 @@ function ensureMiniMapCache(width, height, bounds) {
   }
   cacheCtx.imageSmoothingEnabled = false;
   cacheCtx.clearRect(0, 0, width, height);
-  cacheCtx.fillStyle = "#050914";
+  cacheCtx.fillStyle = "#030712";
   cacheCtx.fillRect(0, 0, width, height);
 
-  const sampleStep = 4;
+  const sampleStep = 6;
   for (let py = 0; py < height; py += sampleStep) {
     for (let px = 0; px < width; px += sampleStep) {
       const worldX = bounds.left + ((px + 0.5) / width) * (bounds.right - bounds.left);
       const worldY = bounds.top + ((py + 0.5) / height) * (bounds.bottom - bounds.top);
       const terrain = getTerrainTileBase(worldX, worldY);
-      let color = "#141b14";
+      let color = "#0a1330";
       if (terrain.type === "water") {
-        color = "#0c2235";
-      } else if (terrain.type === "sand") {
-        color = "#332a1c";
-      } else if (terrain.type === "stone") {
-        color = "#232b3b";
+        color = "#0f2456";
       }
       cacheCtx.fillStyle = color;
       cacheCtx.fillRect(px, py, sampleStep, sampleStep);
     }
   }
-
-  cacheCtx.strokeStyle = "rgba(220, 232, 255, 0.78)";
-  cacheCtx.lineWidth = 2;
-  cacheCtx.strokeRect(1, 1, width - 2, height - 2);
 
   MINIMAP_CACHE.width = width;
   MINIMAP_CACHE.height = height;
@@ -190,22 +192,8 @@ function drawMiniMap() {
     miniCtx.drawImage(MINIMAP_CACHE.canvas, 0, 0, cssWidth, cssHeight);
   }
 
-  const zoom = getCameraZoom();
-  const halfViewWorldWidth = viewWidth * 0.5 * zoom;
-  const halfViewWorldHeight = viewHeight * 0.5 * zoom;
-  const topLeft = worldToMiniMap(state.player.x - halfViewWorldWidth, state.player.y - halfViewWorldHeight, cssWidth, cssHeight, miniBounds);
-  const bottomRight = worldToMiniMap(state.player.x + halfViewWorldWidth, state.player.y + halfViewWorldHeight, cssWidth, cssHeight, miniBounds);
-  miniCtx.strokeStyle = "rgba(199, 219, 255, 0.72)";
-  miniCtx.lineWidth = 1;
-  miniCtx.strokeRect(
-    Math.floor(topLeft.x) + 0.5,
-    Math.floor(topLeft.y) + 0.5,
-    Math.max(2, Math.floor(bottomRight.x - topLeft.x)),
-    Math.max(2, Math.floor(bottomRight.y - topLeft.y))
-  );
-
   const enemyCount = state.enemies.length;
-  const maxMarkers = 320;
+  const maxMarkers = 220;
   const enemyStep = Math.max(1, Math.ceil(enemyCount / maxMarkers));
   for (let i = 0; i < enemyCount; i += enemyStep) {
     const enemy = state.enemies[i];
@@ -223,7 +211,7 @@ function drawMiniMap() {
 
   const edgeTopLeft = worldToMiniMap(WORLD.left, WORLD.top, cssWidth, cssHeight, miniBounds);
   const edgeBottomRight = worldToMiniMap(WORLD.right, WORLD.bottom, cssWidth, cssHeight, miniBounds);
-  miniCtx.strokeStyle = "rgba(196, 216, 255, 0.88)";
+  miniCtx.strokeStyle = "rgba(102, 137, 212, 0.88)";
   miniCtx.lineWidth = 1;
   miniCtx.strokeRect(
     Math.floor(clamp(edgeTopLeft.x, 0, cssWidth)) + 0.5,
@@ -233,11 +221,11 @@ function drawMiniMap() {
   );
 
   const playerPoint = worldToMiniMap(state.player.x, state.player.y, cssWidth, cssHeight, miniBounds);
-  miniCtx.fillStyle = "#9ef3ff";
-  miniCtx.fillRect(Math.round(playerPoint.x - 2), Math.round(playerPoint.y - 2), 4, 4);
+  miniCtx.fillStyle = "#9eefff";
+  miniCtx.fillRect(Math.round(playerPoint.x - 5), Math.round(playerPoint.y - 5), 10, 10);
   miniCtx.strokeStyle = "#dcfaff";
   miniCtx.lineWidth = 1;
-  miniCtx.strokeRect(Math.round(playerPoint.x - 3) + 0.5, Math.round(playerPoint.y - 3) + 0.5, 6, 6);
+  miniCtx.strokeRect(Math.round(playerPoint.x - 6) + 0.5, Math.round(playerPoint.y - 6) + 0.5, 12, 12);
 }
 
 function updateMiniMapObjectives() {
@@ -253,9 +241,11 @@ function updateMiniMapObjectives() {
   }
   const pending = ARCHIVE_CHALLENGES.filter((challenge) => !hasCompletedArchiveChallenge(challenge.id, metaProgress));
   const currentClassId = state.player.classId;
-  const classPriority = pending.filter((challenge) => challenge.classId === currentClassId);
-  const fallback = pending.filter((challenge) => challenge.classId !== currentClassId);
-  const pinned = [...classPriority, ...fallback].slice(0, 2);
+  const classPending = pending.filter((challenge) => challenge.category === "class");
+  const classPriority = classPending.filter((challenge) => challenge.classId === currentClassId);
+  const pinnedClass = classPriority.slice(0, 2);
+  const archivePending = pending.filter((challenge) => challenge.category !== "class");
+  const pinnedArchive = archivePending.slice(0, 2);
   const groups = [];
 
   const nextClassId = getCurrentUnlockTargetId(metaProgress);
@@ -282,8 +272,8 @@ function updateMiniMapObjectives() {
     ].join(""));
   }
 
-  const archiveRows = pinned.length
-    ? pinned.map((challenge) => {
+  const archiveRows = pinnedArchive.length
+    ? pinnedArchive.map((challenge) => {
         const status = getArchiveChallengeStatus(challenge);
         const current = getArchiveChallengeCurrentValue(challenge.id);
         const ratio = challenge.target ? clamp(current / Math.max(1, challenge.target), 0, 1) : hasCompletedArchiveChallenge(challenge.id) ? 1 : 0;
@@ -302,6 +292,30 @@ function updateMiniMapObjectives() {
     archiveRows,
     `</section>`,
   ].join(""));
+
+  if (pinnedClass.length > 0) {
+    const classRows = pinnedClass.map((challenge) => {
+      const status = getArchiveChallengeStatus(challenge);
+      const current = getArchiveChallengeCurrentValue(challenge.id);
+      const ratio = challenge.target ? clamp(current / Math.max(1, challenge.target), 0, 1) : hasCompletedArchiveChallenge(challenge.id) ? 1 : 0;
+      const statusText = challenge.target
+        ? `${challenge.description} | ${status}`
+        : challenge.description;
+      return [
+        `<div class="mini-map-objective-row">`,
+        `<div class="mini-map-objective-head"><span class="mini-map-objective-icon">${challenge.icon ?? "✦"}</span><strong>${challenge.title}</strong></div>`,
+        `<span class="mini-map-objective-status">${statusText}</span>`,
+        `<div class="mini-map-objective-track"><div class="mini-map-objective-fill" style="width:${(ratio * 100).toFixed(1)}%"></div></div>`,
+        `</div>`,
+      ].join("");
+    }).join("");
+    groups.push([
+      `<section class="mini-map-objective-group">`,
+      `<header class="mini-map-objective-group-head"><span class="mini-map-objective-group-kicker">Class Objectives</span></header>`,
+      classRows,
+      `</section>`,
+    ].join(""));
+  }
   const html = groups.join("");
   if (html !== MINIMAP_OBJECTIVES_CACHE.html) {
     MINIMAP_OBJECTIVES_CACHE.html = html;
@@ -393,10 +407,11 @@ function drawBackground() {
   const halfWorldViewHeight = viewHeight * 0.5 * zoom;
   const renderPaddingTiles = 8 + Math.ceil(Math.max(0, zoom - 1) * 20);
   const renderPadding = tileSize * renderPaddingTiles;
-  const startWorldX = Math.floor((state.player.x - halfWorldViewWidth) / tileSize) * tileSize - renderPadding;
-  const startWorldY = Math.floor((state.player.y - halfWorldViewHeight) / tileSize) * tileSize - renderPadding;
-  const endWorldX = Math.ceil((state.player.x + halfWorldViewWidth) / tileSize) * tileSize + renderPadding;
-  const endWorldY = Math.ceil((state.player.y + halfWorldViewHeight) / tileSize) * tileSize + renderPadding;
+  const camera = getCameraState();
+  const startWorldX = Math.floor((camera.worldX - halfWorldViewWidth) / tileSize) * tileSize - renderPadding;
+  const startWorldY = Math.floor((camera.worldY - halfWorldViewHeight) / tileSize) * tileSize - renderPadding;
+  const endWorldX = Math.ceil((camera.worldX + halfWorldViewWidth) / tileSize) * tileSize + renderPadding;
+  const endWorldY = Math.ceil((camera.worldY + halfWorldViewHeight) / tileSize) * tileSize + renderPadding;
   ensureTerrainRenderCache(zoom, startWorldX, startWorldY, endWorldX, endWorldY);
   const terrainOrigin = worldToScreen(startWorldX, startWorldY);
   const terrainOriginX = Math.floor(terrainOrigin.x);
@@ -431,17 +446,33 @@ function drawWorldFeatures(minX, minY, maxX, maxY) {
   iterateWorldFeaturesInBounds(minX, minY, maxX, maxY, (feature) => {
     features.push(feature);
   });
+  features.sort((a, b) => (a.anchorY ?? 0) - (b.anchorY ?? 0));
 
   for (const feature of features) {
-    if (feature.group !== "solid") {
+    if (feature.group === "solid") {
+      drawSolidFeature(feature);
       continue;
     }
-    drawSolidFeature(feature);
+    if (feature.group === "props") {
+      drawDecorFeature(feature);
+    }
   }
 }
 
 function drawSolidFeature(feature) {
-  drawRockFeature(feature);
+  if (feature.type === "rock" || feature.type === "ruin") {
+    drawRockFeature(feature);
+    return;
+  }
+  if (feature.type === "tree") {
+    drawTreeFeature(feature);
+  }
+}
+
+function drawDecorFeature(feature) {
+  if (feature.type === "candle") {
+    drawCandleFeature(feature);
+  }
 }
 
 function drawRockFeature(feature) {
@@ -464,6 +495,58 @@ function drawRockFeature(feature) {
     ctx.strokeStyle = "rgba(219, 228, 232, 0.16)";
     ctx.lineWidth = Math.max(1, width * 0.03);
     ctx.strokeRect(topLeft.x + 0.5, topLeft.y + 0.5, Math.max(1, width - 1), Math.max(1, height - 1));
+  }
+  ctx.restore();
+}
+
+function drawTreeFeature(feature) {
+  const pos = worldToScreen(feature.anchorX, feature.anchorY);
+  if (!isVisible(pos.x, pos.y, (feature.canopyRadius ?? 52) + 24)) {
+    return;
+  }
+  const perfTier = getPerformanceTier();
+  const treeEmoji = feature.treeEmoji ?? "🌲";
+  const treeSize = Math.max(22, ((feature.canopyRadius ?? 52) * 1.3) / getCameraZoom());
+  if (drawEmojiSprite(treeEmoji, pos.x, pos.y - treeSize * 0.16, treeSize, {
+    shadowBlur: perfTier <= 1 ? 14 : 0,
+    shadowColor: "rgba(20, 30, 22, 0.34)",
+  })) {
+    return;
+  }
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `${Math.round(treeSize)}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
+  if (perfTier <= 1) {
+    ctx.shadowBlur = 14;
+    ctx.shadowColor = "rgba(20, 30, 22, 0.34)";
+  }
+  ctx.fillText(treeEmoji, pos.x, pos.y - treeSize * 0.16);
+  ctx.restore();
+}
+
+function drawCandleFeature(feature) {
+  const pos = worldToScreen(feature.anchorX, feature.anchorY);
+  if (!isVisible(pos.x, pos.y, 40)) {
+    return;
+  }
+  const flicker = 0.74 + Math.sin(state.elapsed * 8.4 + (feature.anchorX + feature.anchorY) * 0.02) * 0.16;
+  const size = Math.max(14, (feature.visualSize ?? 18) / getCameraZoom());
+  ctx.save();
+  ctx.globalAlpha = 0.82;
+  const glow = ctx.createRadialGradient(pos.x, pos.y - size * 0.22, 1, pos.x, pos.y - size * 0.22, 24 / getCameraZoom());
+  glow.addColorStop(0, `rgba(255, 215, 132, ${(0.22 + flicker * 0.18).toFixed(3)})`);
+  glow.addColorStop(1, "rgba(255, 215, 132, 0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(pos.x, pos.y - size * 0.22, 24 / getCameraZoom(), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `${Math.round(size)}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
+  ctx.globalAlpha = 0.96;
+  if (!drawEmojiSprite("🕯️", pos.x, pos.y, size, { alpha: 0.96 })) {
+    ctx.fillText("🕯️", pos.x, pos.y);
   }
   ctx.restore();
 }
@@ -2271,6 +2354,7 @@ function drawEnemies() {
     const drawY = pos.y - visualHeight;
     const jumpScale = visualHeight > 0 ? 1 + Math.min(0.18, visualHeight / 900) : 1;
     const font = ENEMY_ARCHETYPES[enemy.type].font;
+    const enemyEmojiSize = Math.max(26, (parseInt(font, 10) || 36) + 2);
     if (font !== activeFont) {
       ctx.font = font;
       activeFont = font;
@@ -2325,9 +2409,13 @@ function drawEnemies() {
       if (jumpScale !== 1) {
         ctx.translate(drawX, drawY + 1);
         ctx.scale(jumpScale, jumpScale);
-        ctx.fillText(enemy.emoji, 0, 0);
+        if (!drawEmojiSprite(enemy.emoji, 0, 0, enemyEmojiSize)) {
+          ctx.fillText(enemy.emoji, 0, 0);
+        }
       } else {
-        ctx.fillText(enemy.emoji, drawX, drawY + 1);
+        if (!drawEmojiSprite(enemy.emoji, drawX, drawY + 1, enemyEmojiSize)) {
+          ctx.fillText(enemy.emoji, drawX, drawY + 1);
+        }
       }
       ctx.restore();
     } else {
@@ -2339,9 +2427,13 @@ function drawEnemies() {
         if (jumpScale !== 1) {
           ctx.translate(drawX, drawY + 1);
           ctx.scale(jumpScale, jumpScale);
-          ctx.fillText(enemy.emoji, 0, 0);
+          if (!drawEmojiSprite(enemy.emoji, 0, 0, enemyEmojiSize)) {
+            ctx.fillText(enemy.emoji, 0, 0);
+          }
         } else {
-          ctx.fillText(enemy.emoji, drawX, drawY + 1);
+          if (!drawEmojiSprite(enemy.emoji, drawX, drawY + 1, enemyEmojiSize)) {
+            ctx.fillText(enemy.emoji, drawX, drawY + 1);
+          }
         }
         ctx.restore();
       } else {
@@ -2349,10 +2441,14 @@ function drawEnemies() {
           ctx.save();
           ctx.translate(drawX, drawY + 1);
           ctx.scale(jumpScale, jumpScale);
-          ctx.fillText(enemy.emoji, 0, 0);
+          if (!drawEmojiSprite(enemy.emoji, 0, 0, enemyEmojiSize)) {
+            ctx.fillText(enemy.emoji, 0, 0);
+          }
           ctx.restore();
         } else {
-          ctx.fillText(enemy.emoji, drawX, drawY + 1);
+          if (!drawEmojiSprite(enemy.emoji, drawX, drawY + 1, enemyEmojiSize)) {
+            ctx.fillText(enemy.emoji, drawX, drawY + 1);
+          }
         }
       }
     }
@@ -2408,7 +2504,13 @@ function drawAllies() {
     ctx.fillStyle = tint.replace("{a}", alpha.toFixed(3));
     ctx.shadowBlur = 12;
     ctx.shadowColor = shadowTint.replace("{a}", (0.35 + alpha * 0.2).toFixed(3));
-    ctx.fillText(ally.emoji, pos.x, pos.y);
+    if (!drawEmojiSprite(ally.emoji, pos.x, pos.y, 28, {
+      alpha,
+      shadowBlur: 12,
+      shadowColor: shadowTint.replace("{a}", (0.35 + alpha * 0.2).toFixed(3)),
+    })) {
+      ctx.fillText(ally.emoji, pos.x, pos.y);
+    }
     ctx.restore();
   }
   ctx.restore();
@@ -2454,7 +2556,12 @@ function drawPlayer() {
     ctx.shadowBlur = 18;
     ctx.shadowColor = "rgba(255, 223, 138, 0.35)";
   }
-  ctx.fillText(state.player.emoji, 0, 0);
+  if (!drawEmojiSprite(state.player.emoji, 0, 0, 44, {
+    shadowBlur: perfTier < 2 ? 18 : 0,
+    shadowColor: "rgba(255, 223, 138, 0.35)",
+  })) {
+    ctx.fillText(state.player.emoji, 0, 0);
+  }
   ctx.restore();
   ctx.shadowBlur = 0;
 }
@@ -2475,7 +2582,7 @@ function drawBossIndicator() {
   const dx = bossScreen.x - centerX;
   const dy = bossScreen.y - centerY;
   const angle = Math.atan2(dy, dx);
-  const margin = 52;
+  const margin = 178;
   const indicatorX = centerX + Math.cos(angle) * (Math.min(viewWidth, viewHeight) * 0.5 - margin);
   const indicatorY = centerY + Math.sin(angle) * (Math.min(viewWidth, viewHeight) * 0.5 - margin);
 
@@ -2493,6 +2600,34 @@ function drawBossIndicator() {
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
+  ctx.restore();
+}
+
+function drawBossIntroBanner() {
+  const intro = state.bossIntro;
+  if (!intro?.active) {
+    return;
+  }
+  const t = clamp(intro.timer / Math.max(0.0001, intro.duration), 0, 1);
+  const alpha = t < 0.18 ? t / 0.18 : t > 0.84 ? (1 - t) / 0.16 : 1;
+  const pulse = 0.55 + Math.sin(intro.timer * 11.2) * 0.18;
+  const bossName = intro.targetBossName || "Boss";
+  ctx.save();
+  ctx.globalAlpha = clamp(alpha, 0, 1);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const y = viewHeight * 0.16;
+  const grad = ctx.createLinearGradient(viewWidth * 0.28, y - 24, viewWidth * 0.72, y + 24);
+  grad.addColorStop(0, "rgba(255, 205, 128, 0.94)");
+  grad.addColorStop(0.55, "rgba(255, 236, 194, 0.98)");
+  grad.addColorStop(1, "rgba(255, 168, 110, 0.94)");
+  ctx.fillStyle = grad;
+  ctx.shadowBlur = 28 + pulse * 18;
+  ctx.shadowColor = "rgba(255, 161, 110, 0.62)";
+  ctx.font = '800 18px "Trebuchet MS", "Segoe UI", sans-serif';
+  ctx.fillText("BOSS APPROACHING", viewWidth * 0.5, y - 28);
+  ctx.font = '900 48px "Trebuchet MS", "Segoe UI", sans-serif';
+  ctx.fillText(bossName.toUpperCase(), viewWidth * 0.5, y + 8);
   ctx.restore();
 }
 
@@ -2571,32 +2706,90 @@ function drawScreenVignette() {
   ctx.save();
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = '700 54px "Trebuchet MS", "Segoe UI", sans-serif';
-  ctx.shadowBlur = 22;
-  ctx.shadowColor = "rgba(255, 120, 120, 0.46)";
-  ctx.fillStyle = `rgba(255, 228, 216, ${clamp(deathProgress * 1.1, 0, 1)})`;
+  const titleAlpha = clamp(deathProgress * 1.1, 0, 1);
+  const titleY = viewHeight * (0.24 - deathProgress * 0.03);
+  const titleGradient = ctx.createLinearGradient(viewWidth * 0.3, titleY - 36, viewWidth * 0.7, titleY + 36);
+  titleGradient.addColorStop(0, `rgba(255, 205, 162, ${titleAlpha})`);
+  titleGradient.addColorStop(0.45, `rgba(255, 239, 214, ${titleAlpha})`);
+  titleGradient.addColorStop(1, `rgba(255, 149, 123, ${titleAlpha})`);
+  ctx.font = '900 62px "Trebuchet MS", "Segoe UI", sans-serif';
+  ctx.shadowBlur = 36 + deathProgress * 20;
+  ctx.shadowColor = `rgba(255, 114, 114, ${(0.4 + deathProgress * 0.44).toFixed(3)})`;
+  ctx.strokeStyle = `rgba(54, 16, 24, ${(0.44 + deathProgress * 0.38).toFixed(3)})`;
+  ctx.lineWidth = 4;
+  ctx.strokeText("RUN OVER", viewWidth * 0.5, titleY);
+  ctx.fillStyle = titleGradient;
   ctx.fillText("RUN OVER", viewWidth * 0.5, viewHeight * (0.24 - deathProgress * 0.03));
   ctx.font = '600 18px "Trebuchet MS", "Segoe UI", sans-serif';
-  ctx.fillStyle = `rgba(255, 206, 198, ${clamp(deathProgress * 0.92, 0, 0.9)})`;
+  ctx.fillStyle = `rgba(255, 214, 194, ${clamp(deathProgress * 0.92, 0, 0.94)})`;
+  ctx.shadowBlur = 18;
+  ctx.shadowColor = `rgba(255, 130, 100, ${(0.22 + deathProgress * 0.4).toFixed(3)})`;
   ctx.fillText("The swarm breaks the line.", viewWidth * 0.5, viewHeight * (0.3 - deathProgress * 0.02));
   ctx.restore();
 }
 
 function getCameraZoom() {
-  const runEnd = state.runEnd;
-  const deathProgress = runEnd.active ? clamp(runEnd.timer / runEnd.duration, 0, 1) : 0;
-  return 0.78 + deathProgress * 0.36;
+  const camera = getCameraState();
+  return camera.zoom;
 }
 
 function worldToScreen(worldX, worldY) {
+  const camera = getCameraState();
+  const zoomOut = camera.zoom;
+  const centerX = camera.centerX;
+  const centerY = camera.centerY;
+  return {
+    x: Math.round((worldX - camera.worldX) / zoomOut + centerX + (state?.cameraShake?.offsetX ?? 0)),
+    y: Math.round((worldY - camera.worldY) / zoomOut + centerY + (state?.cameraShake?.offsetY ?? 0)),
+  };
+}
+
+function getCameraState() {
+  if (!state?.player) {
+    return {
+      worldX: 0,
+      worldY: 0,
+      centerX: viewWidth * 0.5,
+      centerY: viewHeight * 0.5,
+      zoom: 0.78,
+    };
+  }
   const runEnd = state.runEnd;
   const deathProgress = runEnd.active ? clamp(runEnd.timer / runEnd.duration, 0, 1) : 0;
-  const zoomOut = getCameraZoom();
+  const playerX = state.player.x;
+  const playerY = state.player.y;
   const centerX = viewWidth * (0.5 - deathProgress * 0.03);
   const centerY = viewHeight * (0.5 + deathProgress * 0.075);
+  const baseZoom = 0.78 + deathProgress * 0.36;
+  const intro = state.bossIntro;
+  if (!intro?.active) {
+    return { worldX: playerX, worldY: playerY, centerX, centerY, zoom: baseZoom };
+  }
+  const boss = state.enemies.find((enemy) => !enemy.dead && enemy.id === intro.targetEnemyId && enemy.isBoss);
+  if (!boss) {
+    return { worldX: playerX, worldY: playerY, centerX, centerY, zoom: baseZoom };
+  }
+  const t = clamp(intro.timer / Math.max(0.0001, intro.duration), 0, 1);
+  const zoomInPeak = 0.34;
+  const approachEnd = 0.46;
+  const holdEnd = 0.82;
+  const easeOutCubic = (v) => 1 - Math.pow(1 - v, 3);
+  const easeInOutCubic = (v) => (v < 0.5 ? 4 * v * v * v : 1 - Math.pow(-2 * v + 2, 3) / 2);
+  let travel = 0;
+  if (t < approachEnd) {
+    travel = easeOutCubic(clamp(t / approachEnd, 0, 1));
+  } else if (t < holdEnd) {
+    travel = 1;
+  } else {
+    travel = 1 - easeInOutCubic(clamp((t - holdEnd) / (1 - holdEnd), 0, 1));
+  }
+  const zoom = lerp(baseZoom, zoomInPeak, travel);
   return {
-    x: Math.round((worldX - state.player.x) / zoomOut + centerX + state.cameraShake.offsetX),
-    y: Math.round((worldY - state.player.y) / zoomOut + centerY + state.cameraShake.offsetY),
+    worldX: lerp(playerX, boss.x, travel),
+    worldY: lerp(playerY, boss.y, travel),
+    centerX,
+    centerY,
+    zoom,
   };
 }
 
@@ -2945,7 +3138,6 @@ function renderBossPhaseTracks(enemy, bossRatio, lagRatio) {
 
   bossHud.phaseTracks.innerHTML = phases.map((phase, index) => `
     <div class="boss-phase-row${phase.active ? " is-active" : ""}" data-phase-index="${index + 1}">
-      <span class="boss-phase-label">${phase.label}</span>
       <div class="boss-phase-track">
         <div class="boss-phase-lag" style="width:${(phase.lag * 100).toFixed(2)}%"></div>
         <div class="boss-phase-fill" style="width:${(phase.fill * 100).toFixed(2)}%"></div>
@@ -3123,9 +3315,11 @@ function updateRunEndSequence(dt) {
   }
 }
 
-function restartRun() {
+function restartRun(classId = metaProgress.selectedClassId, autoStart = false) {
   window.sfx?.stopRunMusic?.({ immediate: true });
-  state = createInitialState(metaProgress.selectedClassId);
+  state = createInitialState(classId);
+  metaProgress.selectedClassId = classId;
+  saveMetaProgress();
   pressedActions.clear();
   accumulator = 0;
   previousTime = performance.now() / 1000;
@@ -3138,8 +3332,16 @@ function restartRun() {
     archiveRevealPanel.classList.add("hidden");
   }
   renderArchiveToast();
-  renderStartOverlay();
+  if (autoStart) {
+    state.running = true;
+    startOverlay.classList.add("hidden");
+    window.sfx?.play("runStart");
+    window.sfx?.startRunMusic?.();
+  } else {
+    renderStartOverlay();
+  }
   updateHud(true);
+  render();
 }
 
 function restartRunWithArchiveOutro() {
@@ -3149,11 +3351,41 @@ function restartRunWithArchiveOutro() {
     setTimeout(() => {
       gameOverCard.classList.remove("is-leaving");
       archiveRevealPanel.classList.remove("is-leaving");
-      restartRun();
+      restartRun(metaProgress.selectedClassId, false);
     }, 320);
     return;
   }
-  restartRun();
+  restartRun(metaProgress.selectedClassId, false);
+}
+
+function restartSameClassRunWithArchiveOutro() {
+  const classId = state?.player?.classId ?? metaProgress.selectedClassId;
+  if (!gameOverOverlay.classList.contains("hidden") && archiveRevealPanel && !archiveRevealPanel.classList.contains("hidden")) {
+    gameOverCard.classList.add("is-leaving");
+    archiveRevealPanel.classList.add("is-leaving");
+    setTimeout(() => {
+      gameOverCard.classList.remove("is-leaving");
+      archiveRevealPanel.classList.remove("is-leaving");
+      restartRun(classId, true);
+    }, 320);
+    return;
+  }
+  restartRun(classId, true);
+}
+
+function returnToMainMenuWithArchiveOutro() {
+  const classId = state?.player?.classId ?? metaProgress.selectedClassId;
+  if (!gameOverOverlay.classList.contains("hidden") && archiveRevealPanel && !archiveRevealPanel.classList.contains("hidden")) {
+    gameOverCard.classList.add("is-leaving");
+    archiveRevealPanel.classList.add("is-leaving");
+    setTimeout(() => {
+      gameOverCard.classList.remove("is-leaving");
+      archiveRevealPanel.classList.remove("is-leaving");
+      restartRun(classId, false);
+    }, 320);
+    return;
+  }
+  restartRun(classId, false);
 }
 
 function formatTime(totalSeconds) {
@@ -3364,16 +3596,54 @@ function isFeatureNearOrigin(feature) {
   return Math.hypot(feature.anchorX, feature.anchorY) < WORLD_FEATURE_START_CLEAR_RADIUS;
 }
 
-function isFeatureTooCloseToOthers(feature, features) {
+function isFeatureTooCloseToOthers(feature, features, padding = 180) {
   for (const other of features) {
     const dx = feature.anchorX - other.anchorX;
     const dy = feature.anchorY - other.anchorY;
-    const minimumDistance = feature.footprintRadius + other.footprintRadius + 180;
+    const minimumDistance = feature.footprintRadius + other.footprintRadius + padding;
     if (dx * dx + dy * dy < minimumDistance * minimumDistance) {
       return true;
     }
   }
   return false;
+}
+
+function isPointNearWaterFeature(x, y, features, extraRadius = 130) {
+  for (const feature of features) {
+    if (feature.group !== "water") {
+      continue;
+    }
+    for (const circle of feature.circles ?? []) {
+      const limit = circle.r + extraRadius;
+      const dx = x - circle.x;
+      const dy = y - circle.y;
+      if (dx * dx + dy * dy <= limit * limit) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function isTreePlacementTooClose(treeFeature, features, solidPadding = 64, waterPadding = 8) {
+  for (const other of features) {
+    const dx = treeFeature.anchorX - other.anchorX;
+    const dy = treeFeature.anchorY - other.anchorY;
+    const padding = other.group === "water" ? waterPadding : solidPadding;
+    const minimumDistance = treeFeature.footprintRadius + other.footprintRadius + padding;
+    if (dx * dx + dy * dy < minimumDistance * minimumDistance) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function pickTreeEmojiForLocation(rng, x, y, features) {
+  const baseTrees = ["🌲", "🌳"];
+  if (isPointNearWaterFeature(x, y, features, 300)) {
+    return rng() > 0.2 ? "🌴" : baseTrees[Math.floor(rng() * baseTrees.length)];
+  }
+  return baseTrees[Math.floor(rng() * baseTrees.length)];
 }
 
 function createPondFeature(rng, innerLeft, innerTop, innerRight, innerBottom) {
@@ -3472,21 +3742,42 @@ function createRiverFeature(rng, innerLeft, innerTop, innerRight, innerBottom) {
   });
 }
 
-function createTreeFeature(rng, innerLeft, innerTop, innerRight, innerBottom) {
-  const x = lerp(innerLeft + 90, innerRight - 90, rng());
-  const y = lerp(innerTop + 90, innerBottom - 90, rng());
-  const trunkRadius = 22 + rng() * 10;
-  const canopyRadius = trunkRadius + 18 + rng() * 10;
+function createTreeFeature(rng, innerLeft, innerTop, innerRight, innerBottom, options = {}) {
+  const x = options.x ?? lerp(innerLeft + 90, innerRight - 90, rng());
+  const y = options.y ?? lerp(innerTop + 90, innerBottom - 90, rng());
+  const sizeScale = options.sizeScale ?? 1;
+  const trunkRadius = (18 + rng() * 10) * sizeScale;
+  const canopyRadius = trunkRadius + (17 + rng() * 14) * sizeScale;
+  const treeEmojis = ["🌲", "🌳", "🌴"];
+  const treeEmoji = options.treeEmoji ?? treeEmojis[Math.floor(rng() * treeEmojis.length)];
   return finalizeWorldFeature({
     type: "tree",
     group: "solid",
     anchorX: x,
     anchorY: y,
+    treeEmoji,
     canopyRadius,
     circles: [{ x, y, r: trunkRadius }],
     blocksMovement: true,
     blocksProjectiles: true,
     footprintRadius: canopyRadius + 12,
+  });
+}
+
+function createCandleFeature(rng, innerLeft, innerTop, innerRight, innerBottom) {
+  const x = lerp(innerLeft + 42, innerRight - 42, rng());
+  const y = lerp(innerTop + 42, innerBottom - 42, rng());
+  const visualSize = 16 + rng() * 6;
+  return finalizeWorldFeature({
+    type: "candle",
+    group: "props",
+    anchorX: x,
+    anchorY: y,
+    visualSize,
+    circles: [{ x, y, r: 8 }],
+    blocksMovement: false,
+    blocksProjectiles: false,
+    footprintRadius: 15,
   });
 }
 
@@ -3637,6 +3928,116 @@ function generateRegionFeatures(regionX, regionY) {
         continue;
       }
       features.push(waterFeature);
+    }
+
+    const waterFeatures = features.filter((feature) => feature.group === "water");
+    if (waterFeatures.length > 0) {
+      const desiredPalms = 2 + (rng() > 0.4 ? 1 : 0) + (rng() > 0.78 ? 1 : 0);
+      attempts = 0;
+      let palmsPlaced = 0;
+      while (palmsPlaced < desiredPalms && attempts < 28) {
+        attempts += 1;
+        const waterFeature = waterFeatures[Math.floor(rng() * waterFeatures.length)];
+        const waterCircle = (waterFeature.circles ?? [])[Math.floor(rng() * Math.max(1, waterFeature.circles?.length ?? 1))];
+        if (!waterCircle) {
+          continue;
+        }
+        const angle = rng() * Math.PI * 2;
+        const shoreDistance = waterCircle.r + 18 + rng() * 86;
+        const palmX = waterCircle.x + Math.cos(angle) * shoreDistance;
+        const palmY = waterCircle.y + Math.sin(angle) * shoreDistance;
+        const palmTree = createTreeFeature(rng, innerLeft, innerTop, innerRight, innerBottom, {
+          x: palmX,
+          y: palmY,
+          sizeScale: 0.85 + rng() * 0.28,
+          treeEmoji: "🌴",
+        });
+        if (!isFeatureWithinInnerRegion(palmTree, innerLeft, innerTop, innerRight, innerBottom)) {
+          continue;
+        }
+        if (isFeatureNearOrigin(palmTree) || isTreePlacementTooClose(palmTree, features, 42, 0)) {
+          continue;
+        }
+        features.push(palmTree);
+        palmsPlaced += 1;
+      }
+    }
+
+    const desiredTrees = 4 + (rng() > 0.4 ? 1 : 0) + (rng() > 0.72 ? 1 : 0) + (rng() > 0.9 ? 1 : 0);
+    attempts = 0;
+    let treesPlaced = 0;
+    while (treesPlaced < desiredTrees && attempts < 28) {
+      attempts += 1;
+      const treeFeature = createTreeFeature(rng, innerLeft, innerTop, innerRight, innerBottom);
+      treeFeature.treeEmoji = pickTreeEmojiForLocation(rng, treeFeature.anchorX, treeFeature.anchorY, features);
+      if (!isFeatureWithinInnerRegion(treeFeature, innerLeft, innerTop, innerRight, innerBottom)) {
+        continue;
+      }
+      if (isFeatureNearOrigin(treeFeature) || isTreePlacementTooClose(treeFeature, features, 88, 2)) {
+        continue;
+      }
+      features.push(treeFeature);
+      treesPlaced += 1;
+    }
+
+    const forestPatchCount = 1 + (rng() > 0.5 ? 1 : 0) + (rng() > 0.86 ? 1 : 0);
+    attempts = 0;
+    let patchesPlaced = 0;
+    while (patchesPlaced < forestPatchCount && attempts < 26) {
+      attempts += 1;
+      const patchCenterX = lerp(innerLeft + 200, innerRight - 200, rng());
+      const patchCenterY = lerp(innerTop + 200, innerBottom - 200, rng());
+      const patchProbe = finalizeWorldFeature({
+        type: "tree-patch-probe",
+        group: "solid",
+        anchorX: patchCenterX,
+        anchorY: patchCenterY,
+        circles: [{ x: patchCenterX, y: patchCenterY, r: 40 }],
+        blocksMovement: false,
+        blocksProjectiles: false,
+        footprintRadius: 170,
+      });
+      if (isFeatureNearOrigin(patchProbe) || isFeatureTooCloseToOthers(patchProbe, features, 96)) {
+        continue;
+      }
+      const treeCount = 3 + Math.floor(rng() * 4);
+      let planted = 0;
+      let patchAttempts = 0;
+      while (planted < treeCount && patchAttempts < 20) {
+        patchAttempts += 1;
+        const angle = rng() * Math.PI * 2;
+        const distance = 24 + rng() * 122;
+        const treeX = patchCenterX + Math.cos(angle) * distance;
+        const treeY = patchCenterY + Math.sin(angle) * distance;
+        const treeFeature = createTreeFeature(rng, innerLeft, innerTop, innerRight, innerBottom, {
+          x: treeX,
+          y: treeY,
+          sizeScale: 0.8 + rng() * 0.42,
+        });
+        treeFeature.treeEmoji = pickTreeEmojiForLocation(rng, treeFeature.anchorX, treeFeature.anchorY, features);
+        if (!isFeatureWithinInnerRegion(treeFeature, innerLeft, innerTop, innerRight, innerBottom)) {
+          continue;
+        }
+        if (isFeatureNearOrigin(treeFeature) || isTreePlacementTooClose(treeFeature, features, 40, 0)) {
+          continue;
+        }
+        features.push(treeFeature);
+        planted += 1;
+      }
+      patchesPlaced += 1;
+    }
+
+    const desiredCandles = 2 + Math.floor(rng() * 4);
+    attempts = 0;
+    let candlesPlaced = 0;
+    while (candlesPlaced < desiredCandles && attempts < 20) {
+      attempts += 1;
+      const candleFeature = createCandleFeature(rng, innerLeft, innerTop, innerRight, innerBottom);
+      if (isFeatureNearOrigin(candleFeature) || isFeatureTooCloseToOthers(candleFeature, features, 34)) {
+        continue;
+      }
+      features.push(candleFeature);
+      candlesPlaced += 1;
     }
   }
 

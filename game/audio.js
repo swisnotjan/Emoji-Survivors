@@ -25,6 +25,8 @@
     "audio/Gossamer Pursuit.mp3",
   ];
   const MUSIC_BASE_GAIN = 0.5;
+  const MUSIC_TRACK_SWITCH_FADE_MS = 260;
+  const MUSIC_TRACK_QUEUE_LEAD = 0.42;
   let lastUiPitchIndex = -1;
   let lastDashPitchIndex = -1;
 
@@ -74,6 +76,8 @@
   let runMusicPaused = false;
   let runMusicDeathProgress = 0;
   let musicStopToken = 0;
+  let musicTransitionToken = 0;
+  let musicQueuedTransition = false;
   let musicUnlockPending = false;
   let musicGraphReady = false;
   const lastPlayed = Object.create(null);
@@ -180,9 +184,34 @@
       musicElement.loop = false;
       musicElement.volume = 1;
       musicElement.addEventListener("ended", () => {
+        if (musicQueuedTransition) {
+          return;
+        }
         if (!runMusicActive || muted || musicMuted || musicVolume <= 0.0001 || runMusicPaused || runMusicDeathProgress > 0.001) {
           return;
         }
+        startRunMusicTrack(pickNextMusicTrackIndex(), { restart: true });
+      });
+      musicElement.addEventListener("timeupdate", () => {
+        if (
+          musicQueuedTransition ||
+          !runMusicActive ||
+          muted ||
+          musicMuted ||
+          musicVolume <= 0.0001 ||
+          runMusicPaused ||
+          runMusicDeathProgress > 0.001
+        ) {
+          return;
+        }
+        if (!Number.isFinite(musicElement.duration) || musicElement.duration <= 0) {
+          return;
+        }
+        const timeLeft = musicElement.duration - musicElement.currentTime;
+        if (timeLeft > MUSIC_TRACK_QUEUE_LEAD) {
+          return;
+        }
+        musicQueuedTransition = true;
         startRunMusicTrack(pickNextMusicTrackIndex(), { restart: true });
       });
     }
@@ -259,7 +288,37 @@
     }
     const nextIndex = Math.max(0, Math.min(MUSIC_TRACKS.length - 1, trackIndex));
     const nextSrc = encodeURI(MUSIC_TRACKS[nextIndex]);
-    if (currentMusicTrackIndex !== nextIndex || musicElement.src !== new URL(nextSrc, window.location.href).href) {
+    const expectedHref = new URL(nextSrc, window.location.href).href;
+    const shouldSwitchTrack = currentMusicTrackIndex !== nextIndex || musicElement.src !== expectedHref;
+    if (shouldSwitchTrack && !musicElement.paused) {
+      const transitionToken = ++musicTransitionToken;
+      const now = audioCtx?.currentTime ?? 0;
+      if (audioCtx && musicGraphReady && musicGain) {
+        musicGain.gain.cancelScheduledValues(now);
+        musicGain.gain.setTargetAtTime(0.0001, now, 0.08);
+      } else {
+        musicElement.volume = 0;
+      }
+      window.setTimeout(() => {
+        if (!musicElement || transitionToken !== musicTransitionToken || !runMusicActive) {
+          return;
+        }
+        musicElement.src = nextSrc;
+        currentMusicTrackIndex = nextIndex;
+        if (restart) {
+          try {
+            musicElement.currentTime = 0;
+          } catch {
+            // ignore
+          }
+        }
+        musicQueuedTransition = false;
+        applyRunMusicState(runMusicDeathProgress);
+        musicElement.play().catch(() => {});
+      }, MUSIC_TRACK_SWITCH_FADE_MS);
+      return;
+    }
+    if (shouldSwitchTrack) {
       musicElement.src = nextSrc;
       currentMusicTrackIndex = nextIndex;
     }
@@ -270,6 +329,7 @@
         // ignore
       }
     }
+    musicQueuedTransition = false;
     musicStopToken += 1;
     runMusicActive = true;
     runMusicPaused = false;

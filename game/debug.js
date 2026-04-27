@@ -1,5 +1,17 @@
 // Debug/test browser hooks used by local tooling and verification scripts.
 window.render_game_to_text = function renderGameToText() {
+  if (!state?.player) {
+    return JSON.stringify({
+      mode: "boot",
+      render: {
+        scale: Number((renderScale ?? 1).toFixed(2)),
+        width: canvas?.width ?? 0,
+        height: canvas?.height ?? 0,
+        viewportWidth: viewWidth ?? 0,
+        viewportHeight: viewHeight ?? 0,
+      },
+    });
+  }
   let mode = "running";
   if (!state.running && !startOverlay.classList.contains("hidden")) {
     mode = "start_menu";
