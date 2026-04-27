@@ -507,13 +507,20 @@ function drawTreeFeature(feature) {
   const perfTier = getPerformanceTier();
   const treeEmoji = feature.treeEmoji ?? "🌲";
   const treeSize = Math.max(22, ((feature.canopyRadius ?? 52) * 1.3) / getCameraZoom());
-  if (drawEmojiSprite(treeEmoji, pos.x, pos.y - treeSize * 0.16, treeSize)) {
+  if (drawEmojiSprite(treeEmoji, pos.x, pos.y - treeSize * 0.16, treeSize, {
+    shadowBlur: perfTier <= 1 ? 14 : 0,
+    shadowColor: "rgba(20, 30, 22, 0.34)",
+  })) {
     return;
   }
   ctx.save();
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = `${Math.round(treeSize)}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
+  if (perfTier <= 1) {
+    ctx.shadowBlur = 14;
+    ctx.shadowColor = "rgba(20, 30, 22, 0.34)";
+  }
   ctx.fillText(treeEmoji, pos.x, pos.y - treeSize * 0.16);
   ctx.restore();
 }
@@ -581,11 +588,9 @@ function drawProjectiles() {
       spearGradient.addColorStop(0.28, `rgba(${accentRgb}, 0.16)`);
       spearGradient.addColorStop(0.78, projectileColor);
       spearGradient.addColorStop(1, `rgba(${accentRgb}, 0.88)`);
-      ctx.fillStyle = tintAlpha(accentColor, fxTier >= 1 ? 0.16 : 0.22);
-      ctx.beginPath();
-      ctx.arc(0, 0, renderRadius * (fxTier >= 1 ? 2.2 : 2.8), 0, Math.PI * 2);
-      ctx.fill();
       ctx.fillStyle = spearGradient;
+      ctx.shadowBlur = fxTier >= 1 ? 16 : 24;
+      ctx.shadowColor = tintAlpha(accentColor, 0.42);
       ctx.beginPath();
       ctx.moveTo(renderRadius * 1.45, 0);
       ctx.lineTo(-renderRadius * 0.28, -renderRadius * 0.5);
@@ -613,14 +618,8 @@ function drawProjectiles() {
     } else {
       drawGradientTrail(pos.x, pos.y, tailX, tailY, renderRadius * 1.3, projectileRgb, 0.94);
 
-      ctx.fillStyle = tintAlpha(projectileColor, fxTier >= 1 ? 0.18 : 0.24);
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, renderRadius * (fxTier >= 1 ? 1.9 : 2.3), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = tintAlpha(projectileColor, fxTier >= 1 ? 0.07 : 0.10);
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, renderRadius * (fxTier >= 1 ? 3.0 : 3.6), 0, Math.PI * 2);
-      ctx.fill();
+      ctx.shadowBlur = fxTier >= 1 ? 12 : 20;
+      ctx.shadowColor = tintAlpha(projectileColor, 0.62);
       ctx.fillStyle = projectileColor;
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, renderRadius, 0, Math.PI * 2);
@@ -706,23 +705,14 @@ function drawCircularTelegraph(attack, pos, perfTier = 0) {
 
   ctx.save();
   ctx.lineCap = "round";
-  const telegMainW = 3.2 + telegraph.fill * 2.6;
+  ctx.shadowBlur = perfTier >= 2 ? 0 : 16 + telegraph.fill * 14;
+  ctx.shadowColor = colorWithAlpha(attack.color, 0.16 + telegraph.fill * 0.22);
+  ctx.strokeStyle = colorWithAlpha(attack.color, 0.42 + telegraph.fill * 0.32);
+  ctx.lineWidth = 3.2 + telegraph.fill * 2.6;
   ctx.setLineDash([14, 10]);
   ctx.lineDashOffset = dashOffset;
   ctx.beginPath();
   ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-  if (perfTier < 2) {
-    ctx.setLineDash([]);
-    ctx.strokeStyle = colorWithAlpha(attack.color, 0.14 + telegraph.fill * 0.12);
-    ctx.lineWidth = telegMainW * 3.5;
-    ctx.stroke();
-    ctx.setLineDash([14, 10]);
-    ctx.lineDashOffset = dashOffset;
-    ctx.beginPath();
-    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-  }
-  ctx.strokeStyle = colorWithAlpha(attack.color, 0.42 + telegraph.fill * 0.32);
-  ctx.lineWidth = telegMainW;
   ctx.stroke();
 
   ctx.strokeStyle = colorWithAlpha(attack.color, 0.2 + telegraph.fill * 0.24 + telegraph.pulse * 0.08);
@@ -773,23 +763,15 @@ function drawBeamTelegraph(attack, start, end, perfTier = 0) {
 
   ctx.save();
   ctx.lineCap = "round";
-  const beamMainW = attack.width * (0.2 + telegraph.fill * 0.12);
+  ctx.shadowBlur = perfTier >= 2 ? 0 : 18 + telegraph.fill * 12;
+  ctx.shadowColor = colorWithAlpha(attack.color, 0.18 + telegraph.fill * 0.22);
+  ctx.strokeStyle = colorWithAlpha(attack.color, 0.48 + telegraph.fill * 0.24);
+  ctx.lineWidth = attack.width * (0.2 + telegraph.fill * 0.12);
+  ctx.setLineDash([22, 12]);
+  ctx.lineDashOffset = dashOffset;
   ctx.beginPath();
   ctx.moveTo(start.x, start.y);
   ctx.lineTo(end.x, end.y);
-  if (perfTier < 2) {
-    ctx.setLineDash([]);
-    ctx.strokeStyle = colorWithAlpha(attack.color, 0.14 + telegraph.fill * 0.12);
-    ctx.lineWidth = beamMainW * 3.5;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(start.x, start.y);
-    ctx.lineTo(end.x, end.y);
-  }
-  ctx.strokeStyle = colorWithAlpha(attack.color, 0.48 + telegraph.fill * 0.24);
-  ctx.lineWidth = beamMainW;
-  ctx.setLineDash([22, 12]);
-  ctx.lineDashOffset = dashOffset;
   ctx.stroke();
 
   ctx.strokeStyle = colorWithAlpha(attack.color, 0.16 + telegraph.fill * 0.18 + telegraph.pulse * 0.08);
@@ -840,14 +822,8 @@ function drawEnemyAttacks() {
       })();
       if (perfTier === 0) {
         drawGradientTrail(pos.x, pos.y, tailX, tailY, attack.radius * 1.25, attack.rgb, 0.88);
-        ctx.fillStyle = tintAlpha(attack.color, 0.22);
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, attack.radius * 2.0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = tintAlpha(attack.color, 0.08);
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, attack.radius * 3.2, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = tintAlpha(attack.color, 0.42);
       }
       ctx.fillStyle = tintAlpha(attack.color, 0.9);
       ctx.beginPath();
@@ -864,16 +840,15 @@ function drawEnemyAttacks() {
       }
 
       ctx.save();
+      ctx.strokeStyle = tintAlpha(attack.color, 0.88);
+      ctx.lineWidth = attack.width;
+      if (perfTier < 2) {
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = tintAlpha(attack.color, 0.35);
+      }
       ctx.beginPath();
       ctx.moveTo(pos.x, pos.y);
       ctx.lineTo(end.x, end.y);
-      if (perfTier < 2) {
-        ctx.strokeStyle = tintAlpha(attack.color, 0.18);
-        ctx.lineWidth = attack.width * 3.0;
-        ctx.stroke();
-      }
-      ctx.strokeStyle = tintAlpha(attack.color, 0.88);
-      ctx.lineWidth = attack.width;
       ctx.stroke();
       ctx.restore();
       continue;
@@ -885,28 +860,25 @@ function drawEnemyAttacks() {
 
     if (attack.kind === "shockwave") {
       ctx.save();
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, attack.currentRadius, 0, Math.PI * 2);
-      if (perfTier < 2) {
-        ctx.strokeStyle = tintAlpha(attack.color, 0.16);
-        ctx.lineWidth = attack.thickness * 3.5;
-        ctx.stroke();
-      }
       ctx.strokeStyle = tintAlpha(attack.color, 0.58);
       ctx.lineWidth = attack.thickness;
+      if (perfTier < 2) {
+        ctx.shadowBlur = 16;
+        ctx.shadowColor = tintAlpha(attack.color, 0.3);
+      }
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, attack.currentRadius, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
       continue;
     }
 
     ctx.save();
-    if (perfTier < 2) {
-      ctx.fillStyle = tintAlpha(attack.color, 0.14);
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, attack.radius * 1.9, 0, Math.PI * 2);
-      ctx.fill();
-    }
     ctx.fillStyle = tintAlpha(attack.color, 0.24);
+    if (perfTier < 2) {
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = tintAlpha(attack.color, 0.3);
+    }
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, attack.radius, 0, Math.PI * 2);
     ctx.fill();
@@ -1346,6 +1318,8 @@ function drawEffects(layer = "base") {
       withComposite("screen", () => {
         ctx.strokeStyle = tintAlpha(effect.color, 0.15 + lifeRatio * 0.3);
         ctx.lineWidth = effect.lineWidth * Math.max(0.4, lifeRatio);
+        ctx.shadowBlur = fxTier >= 1 ? 6 : 12;
+        ctx.shadowColor = tintAlpha(effect.color, 0.26);
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y);
         ctx.lineTo(end.x, end.y);
@@ -1367,6 +1341,8 @@ function drawEffects(layer = "base") {
       withComposite("screen", () => {
         ctx.strokeStyle = tintAlpha(effect.color, 0.24 + lifeRatio * 0.46);
         ctx.lineWidth = Math.max(1.2, effect.lineWidth * lifeRatio);
+        ctx.shadowBlur = fxTier >= 1 ? 8 : 14;
+        ctx.shadowColor = tintAlpha(effect.color, 0.42);
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
         ctx.stroke();
@@ -2104,11 +2080,9 @@ function drawEffects(layer = "base") {
         orbGradient.addColorStop(0, palette.light(0.14 + envelope.alpha * 0.12));
         orbGradient.addColorStop(0.45, palette.secondary(0.16 + envelope.alpha * 0.18));
         orbGradient.addColorStop(1, palette.secondary(0));
-        ctx.fillStyle = palette.secondary(0.20 + envelope.alpha * 0.18);
-        ctx.beginPath();
-        ctx.arc(orbX, orbY, 36, 0, Math.PI * 2);
-        ctx.fill();
         ctx.fillStyle = orbGradient;
+        ctx.shadowBlur = 28;
+        ctx.shadowColor = palette.secondary(0.18 + envelope.alpha * 0.2);
         ctx.beginPath();
         ctx.arc(orbX, orbY, 20, 0, Math.PI * 2);
         ctx.fill();
@@ -2161,11 +2135,9 @@ function drawEffects(layer = "base") {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.font = '700 22px "Trebuchet MS", "Segoe UI", sans-serif';
-      const holyA = 0.22 + lifeRatio * 0.78;
-      ctx.strokeStyle = `rgba(255, 227, 121, ${(holyA * 0.5).toFixed(3)})`;
-      ctx.lineWidth = 7;
-      ctx.strokeText("LEVEL UP", pos.x, pos.y);
-      ctx.fillStyle = `rgba(255, 236, 157, ${holyA.toFixed(3)})`;
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = "rgba(255, 227, 121, 0.62)";
+      ctx.fillStyle = `rgba(255, 236, 157, ${0.22 + lifeRatio * 0.78})`;
       ctx.fillText("LEVEL UP", pos.x, pos.y);
       ctx.restore();
       continue;
@@ -2178,12 +2150,9 @@ function drawEffects(layer = "base") {
         ctx.globalAlpha = 0.28 + lifeRatio * 0.82;
         ctx.drawImage(sprite, pos.x - sprite.width * 0.5, pos.y - sprite.height * 0.5);
       } else {
-        const dotA = 0.28 + lifeRatio * 0.82;
-        ctx.fillStyle = tintAlpha(effect.color, dotA * 0.28);
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, radius * 2.4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = tintAlpha(effect.color, dotA);
+        ctx.fillStyle = tintAlpha(effect.color, 0.28 + lifeRatio * 0.82);
+        ctx.shadowBlur = fxTier >= 1 ? 6 : 12;
+        ctx.shadowColor = tintAlpha(effect.color, 0.45);
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
         ctx.fill();
@@ -2260,16 +2229,9 @@ function drawPickups() {
     ctx.scale(bodyScale, bodyScale);
     ctx.rotate(isXpOrb ? 0 : Math.PI * 0.25);
     ctx.globalAlpha = introAlpha;
-    const glowR = isXpOrb ? 6.2 : 12;
-    ctx.fillStyle = tintAlpha(glowColor, 0.28);
-    ctx.beginPath();
-    ctx.arc(0, 0, glowR * 2.4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = tintAlpha(glowColor, 0.10);
-    ctx.beginPath();
-    ctx.arc(0, 0, glowR * 3.8, 0, Math.PI * 2);
-    ctx.fill();
     ctx.fillStyle = coreColor;
+    ctx.shadowBlur = 18 + fadeProgress * 6 + expireEase * 4;
+    ctx.shadowColor = glowColor;
     if (isXpOrb) {
       ctx.beginPath();
       ctx.arc(0, 0, 6.2, 0, Math.PI * 2);
@@ -2444,6 +2406,8 @@ function drawEnemies() {
       const hueRotate = status.key === "wind" ? 0 : status.hue;
       if (perfTier === 0) {
         ctx.filter = `saturate(1.18) hue-rotate(${hueRotate}deg) brightness(${1.04 + auraStrength * 0.08})`;
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = tintAlpha(status.aura, 0.2 + auraStrength * 0.35);
       }
       if (jumpScale !== 1) {
         ctx.translate(drawX, drawY + 1);
@@ -2461,6 +2425,8 @@ function drawEnemies() {
       if (enemy.isBoss && enemy.phase >= 2 && perfTier === 0) {
         ctx.save();
         ctx.filter = "saturate(1.18) brightness(1.1)";
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = tintAlpha(BOSS_THEME_COLORS[enemy.type] ?? "rgba(255, 160, 120, {a})", 0.34);
         if (jumpScale !== 1) {
           ctx.translate(drawX, drawY + 1);
           ctx.scale(jumpScale, jumpScale);
@@ -2538,16 +2504,14 @@ function drawAllies() {
     const tint = ally.tint ?? "rgba(220, 203, 255, {a})";
     const shadowTint = ally.shadowTint ?? "rgba(195, 151, 255, {a})";
     ctx.save();
-    ctx.fillStyle = shadowTint.replace("{a}", (0.26 + alpha * 0.14).toFixed(3));
-    ctx.beginPath();
-    ctx.arc(pos.x, pos.y, 22, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = shadowTint.replace("{a}", "0.09");
-    ctx.beginPath();
-    ctx.arc(pos.x, pos.y, 34, 0, Math.PI * 2);
-    ctx.fill();
-    if (!drawEmojiSprite(ally.emoji, pos.x, pos.y, 28, { alpha })) {
-      ctx.fillStyle = tint.replace("{a}", alpha.toFixed(3));
+    ctx.fillStyle = tint.replace("{a}", alpha.toFixed(3));
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = shadowTint.replace("{a}", (0.35 + alpha * 0.2).toFixed(3));
+    if (!drawEmojiSprite(ally.emoji, pos.x, pos.y, 28, {
+      alpha,
+      shadowBlur: 12,
+      shadowColor: shadowTint.replace("{a}", (0.35 + alpha * 0.2).toFixed(3)),
+    })) {
       ctx.fillText(ally.emoji, pos.x, pos.y);
     }
     ctx.restore();
@@ -2570,8 +2534,8 @@ function drawPlayer() {
   if (perfTier <= 1) {
     ctx.save();
     const aura = ctx.createRadialGradient(center.x + jitterX, center.y + jitterY, 1, center.x + jitterX, center.y + jitterY, 28);
-    aura.addColorStop(0, tintAlpha(classDef.color, 0.14 + pulse * 0.06));
-    aura.addColorStop(0.38, tintAlpha(classDef.color, 0.10));
+    aura.addColorStop(0, tintAlpha(classDef.color, 0.08 + pulse * 0.04));
+    aura.addColorStop(0.38, tintAlpha(classDef.color, 0.06));
     aura.addColorStop(1, "rgba(19, 40, 33, 0)");
     ctx.fillStyle = aura;
     ctx.beginPath();
@@ -2591,7 +2555,14 @@ function drawPlayer() {
     ctx.translate(deathProgress * 10, deathProgress * 8);
     ctx.globalAlpha = 1 - deathProgress * 0.16;
   }
-  if (!drawEmojiSprite(state.player.emoji, 0, 0, 44)) {
+  if (perfTier < 2) {
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = "rgba(255, 223, 138, 0.35)";
+  }
+  if (!drawEmojiSprite(state.player.emoji, 0, 0, 44, {
+    shadowBlur: perfTier < 2 ? 18 : 0,
+    shadowColor: "rgba(255, 223, 138, 0.35)",
+  })) {
     ctx.fillText(state.player.emoji, 0, 0);
   }
   ctx.restore();
@@ -2654,15 +2625,13 @@ function drawBossIntroBanner() {
   grad.addColorStop(0.55, "rgba(255, 236, 194, 0.98)");
   grad.addColorStop(1, "rgba(255, 168, 110, 0.94)");
   ctx.fillStyle = grad;
-  const bannerGlowA = (0.18 + pulse * 0.22).toFixed(3);
-  ctx.strokeStyle = `rgba(255, 161, 110, ${bannerGlowA})`;
+  if (getPerformanceTier() < 2) {
+    ctx.shadowBlur = 28 + pulse * 18;
+    ctx.shadowColor = "rgba(255, 161, 110, 0.62)";
+  }
   ctx.font = '800 18px "Trebuchet MS", "Segoe UI", sans-serif';
-  ctx.lineWidth = 8;
-  ctx.strokeText("BOSS APPROACHING", viewWidth * 0.5, y - 28);
   ctx.fillText("BOSS APPROACHING", viewWidth * 0.5, y - 28);
   ctx.font = '900 48px "Trebuchet MS", "Segoe UI", sans-serif';
-  ctx.lineWidth = 16;
-  ctx.strokeText(bossName.toUpperCase(), viewWidth * 0.5, y + 8);
   ctx.fillText(bossName.toUpperCase(), viewWidth * 0.5, y + 8);
   ctx.restore();
 }
@@ -2692,6 +2661,8 @@ function drawDamageNumbers() {
     ctx.translate(pos.x, pos.y);
     ctx.scale(scale, scale);
     if (perfTier === 0) {
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = tintAlpha("rgba(255, 248, 235, {a})", alpha * 0.28);
       ctx.strokeStyle = `rgba(22, 28, 25, ${(alpha * 0.88).toFixed(3)})`;
       ctx.lineWidth = 4;
       ctx.strokeText(String(number.amount), 0, 0);
@@ -2747,20 +2718,17 @@ function drawScreenVignette() {
   titleGradient.addColorStop(0.45, `rgba(255, 239, 214, ${titleAlpha})`);
   titleGradient.addColorStop(1, `rgba(255, 149, 123, ${titleAlpha})`);
   ctx.font = '900 62px "Trebuchet MS", "Segoe UI", sans-serif';
-  ctx.strokeStyle = `rgba(255, 80, 80, ${(0.18 + deathProgress * 0.22).toFixed(3)})`;
-  ctx.lineWidth = 14;
-  ctx.strokeText("RUN OVER", viewWidth * 0.5, titleY);
+  ctx.shadowBlur = 36 + deathProgress * 20;
+  ctx.shadowColor = `rgba(255, 114, 114, ${(0.4 + deathProgress * 0.44).toFixed(3)})`;
   ctx.strokeStyle = `rgba(54, 16, 24, ${(0.44 + deathProgress * 0.38).toFixed(3)})`;
-  ctx.lineWidth = 5;
+  ctx.lineWidth = 4;
   ctx.strokeText("RUN OVER", viewWidth * 0.5, titleY);
   ctx.fillStyle = titleGradient;
   ctx.fillText("RUN OVER", viewWidth * 0.5, viewHeight * (0.24 - deathProgress * 0.03));
   ctx.font = '600 18px "Trebuchet MS", "Segoe UI", sans-serif';
-  const subA = clamp(deathProgress * 0.92, 0, 0.94);
-  ctx.strokeStyle = `rgba(255, 130, 100, ${(0.14 + deathProgress * 0.28).toFixed(3)})`;
-  ctx.lineWidth = 5;
-  ctx.strokeText("The swarm breaks the line.", viewWidth * 0.5, viewHeight * (0.3 - deathProgress * 0.02));
-  ctx.fillStyle = `rgba(255, 214, 194, ${subA.toFixed(3)})`;
+  ctx.fillStyle = `rgba(255, 214, 194, ${clamp(deathProgress * 0.92, 0, 0.94)})`;
+  ctx.shadowBlur = 18;
+  ctx.shadowColor = `rgba(255, 130, 100, ${(0.22 + deathProgress * 0.4).toFixed(3)})`;
   ctx.fillText("The swarm breaks the line.", viewWidth * 0.5, viewHeight * (0.3 - deathProgress * 0.02));
   ctx.restore();
 }
