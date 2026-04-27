@@ -120,8 +120,8 @@
   },
   spawnDirector: {
     baseInterval: 1.08,
-    minInterval: 0.14,
-    maxEnemiesOnField: 500,
+    minInterval: 0.20,
+    maxEnemiesOnField: 130,
     bossSpawnIntervalMultiplier: 5.8,
     bossAmbientCap: 22,
     earlyCapMin: 55,
