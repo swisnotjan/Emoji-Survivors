@@ -2464,7 +2464,7 @@ function drawEnemies() {
       ctx.restore();
     }
 
-    if (perfTier >= 1 || enemy.isBoss || enemy.hp >= enemy.maxHp - 0.01) {
+    if (perfTier >= 2 || enemy.isBoss || enemy.hp >= enemy.maxHp - 0.01) {
       continue;
     }
 
@@ -2528,7 +2528,7 @@ function drawPlayer() {
   const deathProgress = runEnd.active ? clamp(runEnd.timer / runEnd.duration, 0, 1) : 0;
   const deathTilt = deathProgress * 1.56;
 
-  if (perfTier === 0) {
+  if (perfTier <= 1) {
     ctx.save();
     const aura = ctx.createRadialGradient(center.x + jitterX, center.y + jitterY, 1, center.x + jitterX, center.y + jitterY, 28);
     aura.addColorStop(0, tintAlpha(classDef.color, 0.08 + pulse * 0.04));
@@ -5189,7 +5189,7 @@ function damagePlayer(rawDamage, source = null) {
 }
 
 function cellKey(x, y) {
-  return `${x},${y}`;
+  return (x + 4096) * 8192 + (y + 4096);
 }
 
 function getHealthBarColor(hpRatio) {

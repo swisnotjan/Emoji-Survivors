@@ -3949,9 +3949,13 @@ function updateEnemiesAndSpatialGrid(dt) {
       continue;
     }
 
-    for (const key of Object.keys(enemy.statusFlash)) {
-      enemy.statusFlash[key] = Math.max(0, enemy.statusFlash[key] - dt);
-    }
+    const sf = enemy.statusFlash;
+    if (sf.wind > 0) sf.wind = Math.max(0, sf.wind - dt);
+    if (sf.burn > 0) sf.burn = Math.max(0, sf.burn - dt);
+    if (sf.chill > 0) sf.chill = Math.max(0, sf.chill - dt);
+    if (sf.freeze > 0) sf.freeze = Math.max(0, sf.freeze - dt);
+    if (sf.necro > 0) sf.necro = Math.max(0, sf.necro - dt);
+    if (sf.blood > 0) sf.blood = Math.max(0, sf.blood - dt);
     enemy.freezeTimer = Math.max(0, enemy.freezeTimer - dt);
     enemy.freezeResistTimer = Math.max(0, enemy.freezeResistTimer - dt);
     enemy.brittleTimer = Math.max(0, enemy.brittleTimer - dt);
