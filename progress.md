@@ -28,3 +28,29 @@ TODO:
   - switched rounded UI to small-radius pixel corners;
   - introduced thicker, pixel-like borders and shadow/light edge simulation across panels, buttons, bars, chips, overlays, joystick/button controls, and HUD cards.
 - Preserved gameplay layout and DOM structure; the change is styling-only.
+
+## 2026-04-27
+
+- Removed decorative plants from world generation and kept trees + candles only.
+- Expanded tree variety and generation: added mixed tree emoji variants and small clustered forest patches in each region.
+- Removed candle trample mechanic entirely; candles now remain purely decorative with glow.
+- Added boss intro cinematic state/flow:
+  - gameplay freeze during intro,
+  - fast camera pan+zoom to boss and return to player,
+  - cinematic boss name banner.
+- Updated camera math so terrain/background and entity transforms use the same cinematic camera state.
+- Polished run-end overlay text rendering with stronger gradient/stroke/glow treatment for a more epic death moment.
+- Unified normal and boss reward card sizing and aligned boss-reward visual palette with current UI direction.
+- Implemented Win11 emoji lock-in pipeline:
+  - generated `assets/win11-emoji-atlas.png` + `assets/win11-emoji-atlas.json` from Segoe UI Emoji,
+  - added atlas loader/helpers in `game/foundation.js`,
+  - switched major in-run emoji rendering paths (player/enemies/allies/trees/candles) to atlas-first with fallback,
+  - added sprite styling support for upgrade card icons.
+- Added pre-init guards for debug/smoke flow (`update`, `render`, camera helpers, `render_game_to_text`) so automation does not crash before bootstrap.
+- Verification:
+  - `node --check game/foundation.js game/runtime.js game/render.js`
+  - `npm run playtest:smoke` (pass)
+
+TODO:
+- Expand atlas-driven emoji replacement to any remaining DOM/UI emoji surfaces outside upgrade cards if strict full-UI consistency is required.
+- Run a manual desktop gameplay pass to visually verify boss intro pacing and forest density in active combat scenarios.

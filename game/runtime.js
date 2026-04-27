@@ -200,6 +200,13 @@ function createInitialState(classId = "wind") {
       bossName: "",
       options: [],
     },
+    bossIntro: {
+      active: false,
+      timer: 0,
+      duration: 2.25,
+      targetEnemyId: null,
+      targetBossName: "",
+    },
     pause: {
       manual: false,
       focus: false,
@@ -1205,6 +1212,9 @@ function setMusicVolumeFromUi(rawValue) {
   }
   window.sfx.setMusicVolume(value);
   window.sfx.setMusicMuted?.(value <= 0.001);
+  if (value > 0.001 && window.sfx.isMuted?.()) {
+    window.sfx.setMuted?.(false);
+  }
   if (!window.sfx.isMuted?.() && state.running && value > 0.001 && !hadAudibleMusic && !window.sfx.isRunMusicActive?.()) {
     window.sfx.startRunMusic?.();
   }
@@ -1221,6 +1231,9 @@ function setSfxVolumeFromUi(rawValue) {
   }
   window.sfx.setSfxVolume(value);
   window.sfx.setSfxMuted?.(value <= 0.001);
+  if (value > 0.001 && window.sfx.isMuted?.()) {
+    window.sfx.setMuted?.(false);
+  }
   updateAudioMixerUI();
 }
 
@@ -1232,6 +1245,9 @@ function toggleMusicMuteFromUi() {
   const currentVolume = Math.max(0, Math.min(1, Number(window.sfx.getMusicVolume?.() ?? 0)));
   if (muted) {
     const restored = Math.max(0.05, lastMusicUiVolume);
+    if (window.sfx.isMuted?.()) {
+      window.sfx.setMuted?.(false);
+    }
     window.sfx.setMusicVolume?.(restored);
     window.sfx.setMusicMuted?.(false);
     if (!window.sfx.isMuted?.() && state.running && !window.sfx.isRunMusicActive?.()) {
@@ -1255,6 +1271,9 @@ function toggleSfxMuteFromUi() {
   const currentVolume = Math.max(0, Math.min(1, Number(window.sfx.getSfxVolume?.() ?? 0)));
   if (muted) {
     const restored = Math.max(0.05, lastSfxUiVolume);
+    if (window.sfx.isMuted?.()) {
+      window.sfx.setMuted?.(false);
+    }
     window.sfx.setSfxVolume?.(restored);
     window.sfx.setSfxMuted?.(false);
   } else {
@@ -1458,7 +1477,7 @@ function bindEvents() {
 
       if (state.pause.upgradesPanel) {
         playShortcutUiClick();
-        openPauseMenu();
+        closeUpgradesPanel();
       } else if (isPauseActive()) {
         playShortcutUiClick();
         clearPause();
@@ -1475,7 +1494,7 @@ function bindEvents() {
       if (state.running && !state.levelUp.active && !state.bossReward.active) {
         playShortcutUiClick();
         if (state.pause.upgradesPanel) {
-          openPauseMenu();
+          closeUpgradesPanel();
         } else {
           openUpgradesPanel();
         }
@@ -1559,7 +1578,7 @@ function bindEvents() {
       if (!startOverlay.classList.contains("hidden")) {
         startRun();
       } else {
-        restartRunWithArchiveOutro();
+        restartSameClassRunWithArchiveOutro();
       }
     }
   });
@@ -1595,7 +1614,8 @@ function bindEvents() {
 
   window.addEventListener("resize", resizeCanvas);
   window.addEventListener("pointermove", onMageAmbientPointerMove, { passive: true });
-  restartButton.addEventListener("click", restartRunWithArchiveOutro);
+  restartButton.addEventListener("click", restartSameClassRunWithArchiveOutro);
+  returnMenuButton?.addEventListener("click", returnToMainMenuWithArchiveOutro);
   pauseRestartButton.addEventListener("click", () => endRun({ instant: true, cause: "ended" }));
   upgradeOptions.addEventListener("click", onUpgradeOptionClick);
   bossRewardOptions.addEventListener("click", onBossRewardOptionClick);
@@ -2113,6 +2133,9 @@ function scaleFxCount(count) {
 }
 
 function update(dt) {
+  if (!state?.hudMotion) {
+    return;
+  }
   updateHudBarAnimations(dt);
   updateArchiveToast(dt);
 
@@ -2127,35 +2150,41 @@ function update(dt) {
     return;
   }
 
+  let simDt = dt;
+  if (state.bossIntro.active) {
+    updateBossIntroCinematic(dt);
+    simDt *= 0.14;
+  }
+
   state.tick += 1;
-  state.elapsed += dt;
-  state.metaRun.activeDuration += dt;
+  state.elapsed += simDt;
+  state.metaRun.activeDuration += simDt;
   const hpRatio = state.player.hp / Math.max(1, state.player.maxHp);
   if (hpRatio < 0.35) {
     const danger = Math.max(0, 1 - hpRatio * 1.35);
     window.sfx?.play("heartbeat", { intensity: 0.6 + danger * 0.5 });
   }
 
-  updatePlayerMovement(dt);
-  updatePlayerRegeneration(dt);
-  updatePlayerClassBuffs(dt);
-  updateAutoFire(dt);
-  updateAutoSkills(dt);
-  updateProjectiles(dt);
-  updateEffects(dt);
-  spawnEnemies(dt);
+  updatePlayerMovement(simDt);
+  updatePlayerRegeneration(simDt);
+  updatePlayerClassBuffs(simDt);
+  updateAutoFire(simDt);
+  updateAutoSkills(simDt);
+  updateProjectiles(simDt);
+  updateEffects(simDt);
+  spawnEnemies(simDt);
   maybeSpawnBosses();
-  updateEnemiesAndSpatialGrid(dt);
-  updateAllies(dt);
+  updateEnemiesAndSpatialGrid(simDt);
+  updateAllies(simDt);
   resolveProjectileEnemyCollisions(state.enemyGrid);
   resolveAllyEnemyCollisions(state.enemyGrid);
-  updateEnemyAttacks(dt);
-  resolvePlayerEnemyDamage(dt, state.enemyGrid);
-  updatePickups(dt);
+  updateEnemyAttacks(simDt);
+  resolvePlayerEnemyDamage(simDt, state.enemyGrid);
+  updatePickups(simDt);
   cleanupDeadEntities();
-  updateArchiveRunProgress(dt);
+  updateArchiveRunProgress(simDt);
 
-  state.hudTimer -= dt;
+  state.hudTimer -= simDt;
   if (state.hudTimer <= 0) {
     state.hudTimer = 0.08;
     updateHud(state.hudPendingForce);
@@ -3719,8 +3748,35 @@ function spawnBoss(enemyType) {
   recordTelemetryBossSpawn(boss);
   trackArchiveEvent("boss_spawned", { bossType: enemyType });
   spawnBossIntroEffect(boss);
+  startBossIntroCinematic(boss);
   window.sfx?.play("bossSpawn");
   return boss;
+}
+
+function startBossIntroCinematic(boss) {
+  if (!boss || boss.dead || state.runEnd.active || state.levelUp.active || state.bossReward.active) {
+    return;
+  }
+  const intro = state.bossIntro;
+  intro.active = true;
+  intro.timer = 0;
+  intro.targetEnemyId = boss.id;
+  intro.targetBossName = boss.bossName ?? boss.name ?? "Boss";
+}
+
+function updateBossIntroCinematic(dt) {
+  const intro = state.bossIntro;
+  if (!intro.active) {
+    return;
+  }
+  intro.timer += dt;
+  const boss = state.enemies.find((enemy) => !enemy.dead && enemy.id === intro.targetEnemyId && enemy.isBoss);
+  if (!boss || intro.timer >= intro.duration) {
+    intro.active = false;
+    intro.timer = 0;
+    intro.targetEnemyId = null;
+    intro.targetBossName = "";
+  }
 }
 
 function countLivingEnemiesOfType(enemyType) {
@@ -7166,7 +7222,7 @@ function createUpgradeChoiceMarkup(option, hotkeyLabel) {
     `<span class="upgrade-hotkey">${hotkeyLabel}</span>`,
     `<span class="upgrade-choice-head"><span class="upgrade-stacks">${getUpgradeStackLabel(option)}</span><span></span></span>`,
     `<span class="upgrade-choice-main">`,
-    `<span class="upgrade-icon">${option.icon}</span>`,
+    `<span class="upgrade-icon emoji-sprite-icon">${option.icon}</span>`,
     `<span class="upgrade-category">${categoryLabel}</span>`,
     `<span class="upgrade-title">${option.title}</span>`,
     `<span class="upgrade-effect">${option.effectText}</span>`,
@@ -7174,6 +7230,17 @@ function createUpgradeChoiceMarkup(option, hotkeyLabel) {
     `</span>`,
     `<span class="upgrade-choice-foot"><span class="upgrade-tier tier-${option.tier}">${option.tier}</span></span>`,
   ].join("");
+}
+
+function refreshUpgradeEmojiSprites(rootElement) {
+  if (!rootElement) {
+    return;
+  }
+  const icons = rootElement.querySelectorAll(".emoji-sprite-icon");
+  for (const icon of icons) {
+    const emoji = icon.textContent?.trim();
+    applyEmojiSpriteToElement(icon, emoji, 40);
+  }
 }
 
 function renderUpgradeButtons(options) {
@@ -7191,6 +7258,7 @@ function renderUpgradeButtons(options) {
 
     upgradeOptions.appendChild(button);
   }
+  refreshUpgradeEmojiSprites(upgradeOptions);
 }
 
 function retriggerLevelUpFlash() {
@@ -7477,6 +7545,7 @@ function renderBossRewardButtons(options) {
 
     bossRewardOptions.appendChild(button);
   }
+  refreshUpgradeEmojiSprites(bossRewardOptions);
 }
 
 function retriggerBossRewardFlash() {
@@ -7558,6 +7627,7 @@ function refreshPauseOverlay() {
       audioMixer.classList.remove("is-open");
     }
   }
+  document.body.classList.toggle("pause-menu-mode-audio", visible && menuMode);
   pauseOverlay.classList.toggle("hidden", !visible);
   pauseOverlay.classList.toggle("is-menu-mode", visible && menuMode);
   pauseOverlay.classList.toggle("is-upgrades-mode", visible && state.pause.upgradesPanel && !state.pause.devMenu);
@@ -7618,7 +7688,7 @@ function toggleUpgradesPanel() {
   }
 
   if (state.pause.upgradesPanel) {
-    openPauseMenu();
+    closeUpgradesPanel();
     return;
   }
 

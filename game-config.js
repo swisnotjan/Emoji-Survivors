@@ -282,7 +282,7 @@
       font: '25px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif',
     },
     hexer: {
-      emoji: "\uD83E\uDDDB",
+      emoji: "\uD83D\uDC09",
       radius: 17,
       speed: 68,
       hp: 42,
