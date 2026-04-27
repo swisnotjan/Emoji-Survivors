@@ -23,20 +23,38 @@ function render() {
     return;
   }
   ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
-  drawBackground();
-  drawEffects("base");
-  drawEffects("top");
-  drawPickups();
-  drawProjectiles();
-  drawEnemyTelegraphs();
-  drawEnemyAttacks();
-  drawAllies();
-  drawEnemies();
-  drawScreenVignette();
-  drawDamageNumbers();
-  drawBossIndicator();
-  drawBossIntroBanner();
-  drawPlayer();
+  if (!isProfilerEnabled()) {
+    drawBackground();
+    drawEffects("base");
+    drawEffects("top");
+    drawPickups();
+    drawProjectiles();
+    drawEnemyTelegraphs();
+    drawEnemyAttacks();
+    drawAllies();
+    drawEnemies();
+    drawScreenVignette();
+    drawDamageNumbers();
+    drawBossIndicator();
+    drawBossIntroBanner();
+    drawPlayer();
+    return;
+  }
+
+  profileRenderStage("background", drawBackground);
+  profileRenderStage("effectsBase", () => drawEffects("base"));
+  profileRenderStage("effectsTop", () => drawEffects("top"));
+  profileRenderStage("pickups", drawPickups);
+  profileRenderStage("projectiles", drawProjectiles);
+  profileRenderStage("telegraphs", drawEnemyTelegraphs);
+  profileRenderStage("enemyAttacks", drawEnemyAttacks);
+  profileRenderStage("allies", drawAllies);
+  profileRenderStage("enemies", drawEnemies);
+  profileRenderStage("vignette", drawScreenVignette);
+  profileRenderStage("damageNumbers", drawDamageNumbers);
+  profileRenderStage("bossIndicator", drawBossIndicator);
+  profileRenderStage("bossIntroBanner", drawBossIntroBanner);
+  profileRenderStage("player", drawPlayer);
 }
 
 function ensureVignetteCache() {
@@ -2637,7 +2655,7 @@ function drawBossIntroBanner() {
   ctx.globalAlpha = clamp(alpha, 0, 1);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const y = viewHeight * 0.16;
+  const y = viewHeight * 0.21;
   const grad = ctx.createLinearGradient(viewWidth * 0.28, y - 24, viewWidth * 0.72, y + 24);
   grad.addColorStop(0, "rgba(255, 205, 128, 0.94)");
   grad.addColorStop(0.55, "rgba(255, 236, 194, 0.98)");
@@ -3056,6 +3074,10 @@ function updateSkillHud() {
     card.icon.textContent = skillDef.icon;
     card.fill.style.height = `${(progress * 100).toFixed(1)}%`;
     card.lockBadge?.classList.toggle("is-visible", !skillState.unlocked);
+    const mastery = clamp(skillState.mastery ?? 0, 0, 2);
+    card.masteryDots?.forEach((dot, index) => {
+      dot.classList.toggle("is-filled", skillState.unlocked && mastery > index);
+    });
     card.root.dataset.tooltipIcon = skillDef.icon;
     card.root.dataset.tooltipTitle = skillDef.title;
     card.root.dataset.tooltipMeta = `Slot ${card.slot} - ${skillDef.role} - ${formatTargetingLabel(skillDef.targeting)}`;
@@ -3303,6 +3325,7 @@ function applyRunMetaProgress() {
 
 function finishRunSummary() {
   window.sfx?.stopRunMusic?.({ immediate: false });
+  finalizePerformanceRecorderRun(state.runEnd.cause || "ended");
   state.running = false;
   state.runEnd.active = false;
   state.levelUp.active = false;
@@ -4207,12 +4230,39 @@ function segmentHitsBlockingFeature(ax, ay, bx, by, radius) {
   return hit;
 }
 
+function getCachedTerrainTile(cacheKey) {
+  return TERRAIN_TILE_CACHE.get(cacheKey) ?? null;
+}
+
+function getTerrainTileCacheKey(tileX, tileY) {
+  return (tileY - TERRAIN_CACHE_MIN_TILE_Y) * TERRAIN_CACHE_TILES_X + (tileX - TERRAIN_CACHE_MIN_TILE_X);
+}
+
+function setCachedTerrainTile(cacheKey, value) {
+  TERRAIN_TILE_CACHE.set(cacheKey, value);
+  const highWaterMark = TERRAIN_TILE_CACHE_MAX_ENTRIES + TERRAIN_TILE_CACHE_OVERFLOW_BUFFER;
+  if (TERRAIN_TILE_CACHE.size <= highWaterMark) {
+    return;
+  }
+  const targetSize = Math.max(
+    0,
+    TERRAIN_TILE_CACHE_MAX_ENTRIES - Math.max(0, TERRAIN_TILE_CACHE_PRUNE_BATCH)
+  );
+  while (TERRAIN_TILE_CACHE.size > targetSize) {
+    const oldestKey = TERRAIN_TILE_CACHE.keys().next().value;
+    if (oldestKey == null) {
+      break;
+    }
+    TERRAIN_TILE_CACHE.delete(oldestKey);
+  }
+}
+
 function getTerrainTileBase(worldX, worldY) {
   const seed = getWorldSeed();
   const tileX = Math.round(worldX / TERRAIN_TILE_SIZE);
   const tileY = Math.round(worldY / TERRAIN_TILE_SIZE);
-  const cacheKey = `${seed}:${tileX}:${tileY}`;
-  const cached = TERRAIN_TILE_CACHE.get(cacheKey);
+  const cacheKey = getTerrainTileCacheKey(tileX, tileY);
+  const cached = getCachedTerrainTile(cacheKey);
   if (cached) {
     return cached;
   }
@@ -4311,7 +4361,7 @@ function getTerrainTileBase(worldX, worldY) {
     speckY: 4 + Math.floor(hash2D(worldX * 0.12, worldY * 0.12, seed + 317) * 10),
     speckSize: 1 + Math.floor(hash2D(worldX * 0.08, worldY * 0.08, seed + 331) * 2),
   };
-  TERRAIN_TILE_CACHE.set(cacheKey, base);
+  setCachedTerrainTile(cacheKey, base);
   return base;
 }
 

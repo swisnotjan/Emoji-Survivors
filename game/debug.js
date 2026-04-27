@@ -218,6 +218,8 @@ window.render_game_to_text = function renderGameToText() {
       final: state.telemetry.final,
     } : null,
     fps: state.performance.fpsDisplay,
+    profiler: getPerformanceProfilerSnapshot(),
+    profilerRecording: getPerformanceRecorderSummary(),
     dev: {
       activeTab: state.dev.activeTab,
       codexTab: state.pause.codexTab,
@@ -592,6 +594,41 @@ window.debug_game = {
   endRun() {
     endRun();
     render();
+  },
+  setProfilerEnabled(enabled) {
+    const active = togglePerformanceProfiler(Boolean(enabled));
+    render();
+    return active;
+  },
+  toggleProfiler() {
+    const active = togglePerformanceProfiler();
+    render();
+    return active;
+  },
+  getProfilerSnapshot() {
+    return getPerformanceProfilerSnapshot();
+  },
+  startProfilerRecording(options = {}) {
+    const active = setPerformanceRecorderEnabled(true, options);
+    render();
+    return active;
+  },
+  stopProfilerRecording() {
+    const active = setPerformanceRecorderEnabled(false);
+    render();
+    return active;
+  },
+  toggleProfilerRecording() {
+    const active = togglePerformanceRecorder();
+    render();
+    return active;
+  },
+  clearProfilerRecording() {
+    clearPerformanceRecorderData();
+    render();
+  },
+  getProfilerRecording() {
+    return getPerformanceRecorderSnapshot();
   },
   snapshot() {
     return JSON.parse(window.render_game_to_text());

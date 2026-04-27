@@ -178,18 +178,30 @@
                 <span class="skill-lock-badge">&#x1F512;</span>
                 <span class="skill-cd"></span>
                 <span class="skill-icon">&#x2726;</span>
+                <div class="skill-mastery-dots" aria-hidden="true">
+                  <span class="skill-mastery-dot"></span>
+                  <span class="skill-mastery-dot"></span>
+                </div>
               </div>
               <div class="skill-card skill-card-active locked" data-skill-slot="2">
                 <div class="skill-card-fill"><div class="skill-fill"></div></div>
                 <span class="skill-lock-badge">&#x1F512;</span>
                 <span class="skill-cd"></span>
                 <span class="skill-icon">&#x2726;</span>
+                <div class="skill-mastery-dots" aria-hidden="true">
+                  <span class="skill-mastery-dot"></span>
+                  <span class="skill-mastery-dot"></span>
+                </div>
               </div>
               <div class="skill-card skill-card-active locked" data-skill-slot="3">
                 <div class="skill-card-fill"><div class="skill-fill"></div></div>
                 <span class="skill-lock-badge">&#x1F512;</span>
                 <span class="skill-cd"></span>
                 <span class="skill-icon">&#x2726;</span>
+                <div class="skill-mastery-dots" aria-hidden="true">
+                  <span class="skill-mastery-dot"></span>
+                  <span class="skill-mastery-dot"></span>
+                </div>
               </div>
             </div>
           </div>
@@ -207,6 +219,7 @@
       </div>
 
       <div id="fpsValue" class="fps-readout">FPS 0</div>
+      <div id="perfProfiler" class="perf-profiler hidden" aria-live="polite"></div>
       <div id="archiveToastLayer" class="archive-toast-layer hidden" aria-live="polite"></div>
 
       <div id="touchControls" class="touch-controls hidden" aria-hidden="true">
@@ -340,7 +353,7 @@
           <div class="upgrades-head">
             <div>
               <p class="menu-kicker">Paused</p>
-              <h2 id="pauseTitle">Upgrade Codex</h2>
+              <h2 id="pauseTitle">Upgrades</h2>
             </div>
             <div class="pause-actions">
               <button id="pauseRestartButton" class="pause-button pause-button-danger" type="button">End Run</button>
@@ -349,10 +362,6 @@
           </div>
           <p id="pauseSubtitle" class="upgrades-subtitle">Review your build while the run is paused. Press Esc or Resume to continue.</p>
           <div id="pauseMeta" class="pause-meta"></div>
-          <div id="codexTabNav" class="codex-tab-nav">
-            <button type="button" class="codex-tab-button is-active" data-codex-tab="build">Build</button>
-            <button type="button" class="codex-tab-button" data-codex-tab="archive">Archive</button>
-          </div>
           <div id="devToolsPanel" class="dev-tools hidden">
             <div class="dev-tools-head">
               <span class="dev-chip">Dev</span>
@@ -495,6 +504,7 @@
           </div>
         </div>
       </div>
+      <div id="startRunTransitionMask" class="start-run-transition-mask hidden" aria-hidden="true"></div>
     </div>
 
     <script src="game-config.js"></script>

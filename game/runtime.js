@@ -1,4 +1,17 @@
 // Core gameplay state transitions, simulation, spawning, skills, and enemy behavior.
+let startRunTransitionRunning = false;
+const PERFORMANCE_RECORDER = {
+  enabled: false,
+  forceProfiler: false,
+  sampleEverySec: 0.5,
+  maxSamplesPerRun: 800,
+  maxRuns: 14,
+  nextRunId: 1,
+  sampleTimer: 0,
+  activeRun: null,
+  runs: [],
+};
+
 function createInitialState(classId = "wind") {
   WORLD_FEATURE_CACHE.clear();
   TERRAIN_TILE_CACHE.clear();
@@ -74,6 +87,8 @@ function createInitialState(classId = "wind") {
       hitShakePower: 0,
       lastMoveX: 1,
       lastMoveY: 0,
+      moveVX: 0,
+      moveVY: 0,
       fireCooldown: 0,
       regenPerSecond: 0,
       onKillHeal: 0,
@@ -117,7 +132,7 @@ function createInitialState(classId = "wind") {
         fireInterval: 0.42,
         projectileSpeed: 470,
         projectileDamage: classDef.autoDamage,
-        projectileRadius: 4.4,
+        projectileRadius: 5.2,
         projectileLife: 1.2,
         projectilePierce: classId === "necro" ? 2 : 1,
         extraProjectiles: 0,
@@ -267,6 +282,24 @@ function createInitialState(classId = "wind") {
       fpsTimer: 0,
       tier: 0,
       renderScaleTarget: 1,
+      profiler: {
+        enabled: false,
+        refreshTimer: 0,
+        frameIndex: 0,
+        frameBudgetMs: 1000 / TARGET_FPS,
+        windowFrames: 0,
+        windowCpuMs: 0,
+        windowUpdateMs: 0,
+        windowRenderMs: 0,
+        windowStageMs: Object.create(null),
+        avgCpuMs: 0,
+        avgUpdateMs: 0,
+        avgRenderMs: 0,
+        avgStageMs: Object.create(null),
+        worstCpuMs: 0,
+        worstAt: 0,
+        current: null,
+      },
     },
   };
 }
@@ -1446,6 +1479,18 @@ function bindEvents() {
   });
 
   window.addEventListener("keydown", (event) => {
+    if (event.code === "F8" && !event.repeat && !event.ctrlKey && !event.metaKey) {
+      togglePerformanceProfiler();
+      event.preventDefault();
+      return;
+    }
+    if (event.code === "F9" && !event.repeat && !event.ctrlKey && !event.metaKey) {
+      togglePerformanceRecorder();
+      renderProfilerOverlay();
+      event.preventDefault();
+      return;
+    }
+
     if (isDevToggleEvent(event)) {
       if (state.running && !state.levelUp.active && !state.bossReward.active) {
         toggleDevMenu();
@@ -1644,7 +1689,6 @@ function bindEvents() {
   });
   closeUpgradesButton.addEventListener("click", closeUpgradesPanel);
   upgradesList.addEventListener("click", onUpgradeRowClick);
-  codexTabNav?.addEventListener("click", onCodexTabClick);
   pauseOverlay.addEventListener("click", (event) => {
     if (event.target !== pauseOverlay || !isPauseActive()) {
       return;
@@ -2058,9 +2102,15 @@ function gameLoop(nowMs) {
   }
 
   const now = nowMs / 1000;
-  const frameTime = Math.min(now - previousTime, MAX_FRAME_TIME);
+  const elapsed = now - previousTime;
+  if (elapsed < TARGET_FRAME_TIME) {
+    requestAnimationFrame(gameLoop);
+    return;
+  }
+  const frameTime = Math.min(elapsed, MAX_FRAME_TIME);
   previousTime = now;
   updateFps(frameTime);
+  beginProfilerFrame(frameTime);
   accumulator += frameTime;
 
   while (accumulator >= FIXED_STEP) {
@@ -2068,7 +2118,10 @@ function gameLoop(nowMs) {
     accumulator -= FIXED_STEP;
   }
 
+  const renderStart = profilerNow();
   render();
+  profileCurrentFrameRenderTotal(profilerNow() - renderStart);
+  finalizeProfilerFrame();
   requestAnimationFrame(gameLoop);
 }
 
@@ -2090,6 +2143,462 @@ function updateFps(frameTime) {
     state.hudCache.fps = label;
     fpsValue.textContent = label;
   }
+}
+
+function profilerNow() {
+  return performance.now();
+}
+
+function getProfilerState() {
+  return state?.performance?.profiler ?? null;
+}
+
+function isProfilerEnabled() {
+  return Boolean(getProfilerState()?.enabled);
+}
+
+function clampProfilerRecorderValue(value, min, max, fallback) {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return clamp(value, min, max);
+}
+
+function getPerformanceRecorderCounts() {
+  return {
+    enemies: state.enemies.length,
+    projectiles: state.projectiles.length,
+    effects: state.effects.length,
+    enemyAttacks: state.enemyAttacks.length,
+    damageNumbers: state.damageNumbers.length,
+    allies: state.allies.length,
+  };
+}
+
+function createPerformanceRecorderRunSession() {
+  const classDef = getClassDef();
+  return {
+    runId: PERFORMANCE_RECORDER.nextRunId++,
+    classId: state.player.classId,
+    classTitle: classDef?.title ?? state.player.classId,
+    startedAtIso: new Date().toISOString(),
+    startedAtSec: Number(state.elapsed.toFixed(2)),
+    samples: [],
+    droppedSamples: 0,
+    peakCpuMs: 0,
+    peakAtSec: 0,
+    minFps: Number.POSITIVE_INFINITY,
+    maxCounts: getPerformanceRecorderCounts(),
+    topStages: Object.create(null),
+  };
+}
+
+function bumpRecorderTopStages(recorderRun, stagePairs) {
+  for (const [stageId, value] of stagePairs) {
+    const previous = recorderRun.topStages[stageId] ?? 0;
+    if (value > previous) {
+      recorderRun.topStages[stageId] = value;
+    }
+  }
+}
+
+function pushPerformanceRecorderSample(force = false) {
+  const recorder = PERFORMANCE_RECORDER;
+  const profiler = getProfilerState();
+  if (!recorder.enabled || !recorder.activeRun || !profiler?.enabled) {
+    return;
+  }
+  if (!force) {
+    recorder.sampleTimer -= 0.25;
+    if (recorder.sampleTimer > 0) {
+      return;
+    }
+  }
+  recorder.sampleTimer = recorder.sampleEverySec;
+  const sampleCounts = getPerformanceRecorderCounts();
+  const sample = {
+    timeSec: Number(state.elapsed.toFixed(2)),
+    fps: state.performance.fpsDisplay,
+    cpuMs: Number(profiler.avgCpuMs.toFixed(3)),
+    updateMs: Number(profiler.avgUpdateMs.toFixed(3)),
+    renderMs: Number(profiler.avgRenderMs.toFixed(3)),
+    counts: sampleCounts,
+    topStages: getProfilerTopStages(4).map(([stageId, value]) => ({
+      stageId,
+      ms: Number(value.toFixed(3)),
+    })),
+  };
+  if (recorder.activeRun.samples.length >= recorder.maxSamplesPerRun) {
+    recorder.activeRun.droppedSamples += 1;
+  } else {
+    recorder.activeRun.samples.push(sample);
+  }
+  recorder.activeRun.peakCpuMs = Math.max(recorder.activeRun.peakCpuMs, sample.cpuMs);
+  if (sample.cpuMs >= recorder.activeRun.peakCpuMs) {
+    recorder.activeRun.peakAtSec = sample.timeSec;
+  }
+  recorder.activeRun.minFps = Math.min(recorder.activeRun.minFps, sample.fps);
+  recorder.activeRun.maxCounts.enemies = Math.max(recorder.activeRun.maxCounts.enemies, sampleCounts.enemies);
+  recorder.activeRun.maxCounts.projectiles = Math.max(recorder.activeRun.maxCounts.projectiles, sampleCounts.projectiles);
+  recorder.activeRun.maxCounts.effects = Math.max(recorder.activeRun.maxCounts.effects, sampleCounts.effects);
+  recorder.activeRun.maxCounts.enemyAttacks = Math.max(recorder.activeRun.maxCounts.enemyAttacks, sampleCounts.enemyAttacks);
+  recorder.activeRun.maxCounts.damageNumbers = Math.max(recorder.activeRun.maxCounts.damageNumbers, sampleCounts.damageNumbers);
+  recorder.activeRun.maxCounts.allies = Math.max(recorder.activeRun.maxCounts.allies, sampleCounts.allies);
+  bumpRecorderTopStages(
+    recorder.activeRun,
+    Object.entries(profiler.avgStageMs).sort((a, b) => b[1] - a[1]).slice(0, 8)
+  );
+}
+
+function ensurePerformanceRecorderRun() {
+  const recorder = PERFORMANCE_RECORDER;
+  if (!recorder.enabled || !state.running) {
+    return;
+  }
+  if (!isProfilerEnabled()) {
+    recorder.forceProfiler = true;
+    setPerformanceProfilerEnabled(true);
+  } else {
+    resetProfilerStats();
+  }
+  if (!recorder.activeRun) {
+    recorder.activeRun = createPerformanceRecorderRunSession();
+    recorder.sampleTimer = 0;
+  }
+}
+
+function finalizePerformanceRecorderRun(cause = "ended") {
+  const recorder = PERFORMANCE_RECORDER;
+  if (!recorder.activeRun) {
+    return null;
+  }
+  pushPerformanceRecorderSample(true);
+  const completedRun = recorder.activeRun;
+  completedRun.endedAtIso = new Date().toISOString();
+  completedRun.durationSec = Number(state.elapsed.toFixed(2));
+  completedRun.endCause = String(cause ?? "ended");
+  completedRun.minFps = Number.isFinite(completedRun.minFps) ? completedRun.minFps : state.performance.fpsDisplay;
+  completedRun.topStages = Object.entries(completedRun.topStages)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([stageId, ms]) => ({ stageId, ms: Number(ms.toFixed(3)) }));
+  completedRun.finalSnapshot = getPerformanceProfilerSnapshot();
+  recorder.runs.push(completedRun);
+  if (recorder.runs.length > recorder.maxRuns) {
+    recorder.runs.splice(0, recorder.runs.length - recorder.maxRuns);
+  }
+  recorder.activeRun = null;
+  recorder.sampleTimer = 0;
+  return completedRun;
+}
+
+function setPerformanceRecorderEnabled(enabled, options = null) {
+  const recorder = PERFORMANCE_RECORDER;
+  if (options && typeof options === "object") {
+    if (Object.prototype.hasOwnProperty.call(options, "sampleEverySec")) {
+      recorder.sampleEverySec = clampProfilerRecorderValue(Number(options.sampleEverySec), 0.2, 4, recorder.sampleEverySec);
+    }
+    if (Object.prototype.hasOwnProperty.call(options, "maxSamplesPerRun")) {
+      recorder.maxSamplesPerRun = Math.round(clampProfilerRecorderValue(Number(options.maxSamplesPerRun), 120, 4000, recorder.maxSamplesPerRun));
+    }
+    if (Object.prototype.hasOwnProperty.call(options, "maxRuns")) {
+      recorder.maxRuns = Math.round(clampProfilerRecorderValue(Number(options.maxRuns), 1, 50, recorder.maxRuns));
+      if (recorder.runs.length > recorder.maxRuns) {
+        recorder.runs.splice(0, recorder.runs.length - recorder.maxRuns);
+      }
+    }
+  }
+
+  const next = Boolean(enabled);
+  if (next === recorder.enabled) {
+    return recorder.enabled;
+  }
+
+  recorder.enabled = next;
+  recorder.sampleTimer = 0;
+  if (recorder.enabled) {
+    ensurePerformanceRecorderRun();
+    return true;
+  }
+
+  if (state?.running) {
+    finalizePerformanceRecorderRun("recording_stopped");
+  }
+  if (recorder.forceProfiler) {
+    recorder.forceProfiler = false;
+    setPerformanceProfilerEnabled(false);
+  }
+  return false;
+}
+
+function togglePerformanceRecorder(forceState = null, options = null) {
+  const next = forceState == null ? !PERFORMANCE_RECORDER.enabled : Boolean(forceState);
+  return setPerformanceRecorderEnabled(next, options);
+}
+
+function clearPerformanceRecorderData() {
+  PERFORMANCE_RECORDER.runs = [];
+  PERFORMANCE_RECORDER.activeRun = null;
+  PERFORMANCE_RECORDER.sampleTimer = 0;
+  ensurePerformanceRecorderRun();
+}
+
+function getPerformanceRecorderSnapshot() {
+  return {
+    enabled: PERFORMANCE_RECORDER.enabled,
+    sampleEverySec: PERFORMANCE_RECORDER.sampleEverySec,
+    maxSamplesPerRun: PERFORMANCE_RECORDER.maxSamplesPerRun,
+    maxRuns: PERFORMANCE_RECORDER.maxRuns,
+    activeRun: PERFORMANCE_RECORDER.activeRun
+      ? JSON.parse(JSON.stringify(PERFORMANCE_RECORDER.activeRun))
+      : null,
+    runs: PERFORMANCE_RECORDER.runs.map((run) => JSON.parse(JSON.stringify(run))),
+  };
+}
+
+function getPerformanceRecorderSummary() {
+  const lastRun = PERFORMANCE_RECORDER.runs.at(-1) ?? null;
+  return {
+    enabled: PERFORMANCE_RECORDER.enabled,
+    runsCaptured: PERFORMANCE_RECORDER.runs.length,
+    hasActiveRun: Boolean(PERFORMANCE_RECORDER.activeRun),
+    sampleEverySec: PERFORMANCE_RECORDER.sampleEverySec,
+    lastRun: lastRun
+      ? {
+        runId: lastRun.runId,
+        classId: lastRun.classId,
+        durationSec: lastRun.durationSec,
+        endCause: lastRun.endCause,
+        peakCpuMs: lastRun.peakCpuMs,
+        minFps: lastRun.minFps,
+        samples: lastRun.samples.length,
+      }
+      : null,
+  };
+}
+
+function beginProfilerFrame(frameTime) {
+  const profiler = getProfilerState();
+  if (!profiler || !profiler.enabled) {
+    return;
+  }
+  profiler.current = {
+    updateMs: 0,
+    renderMs: 0,
+    stages: Object.create(null),
+  };
+  profiler.frameBudgetMs = frameTime * 1000;
+}
+
+function profileStage(kind, name, callback) {
+  const profiler = getProfilerState();
+  const current = profiler?.current;
+  if (!profiler?.enabled || !current) {
+    callback();
+    return;
+  }
+  const started = profilerNow();
+  callback();
+  const elapsed = profilerNow() - started;
+  const key = `${kind}:${name}`;
+  current.stages[key] = (current.stages[key] ?? 0) + elapsed;
+  if (kind === "u") {
+    current.updateMs += elapsed;
+  } else {
+    current.renderMs += elapsed;
+  }
+}
+
+function profileUpdateStage(name, callback) {
+  profileStage("u", name, callback);
+}
+
+function profileRenderStage(name, callback) {
+  profileStage("r", name, callback);
+}
+
+function profileCurrentFrameRenderTotal(elapsedMs) {
+  const profiler = getProfilerState();
+  if (!profiler?.enabled || !profiler.current) {
+    return;
+  }
+  profiler.current.renderMs = Math.max(profiler.current.renderMs, elapsedMs);
+}
+
+function finalizeProfilerFrame() {
+  const profiler = getProfilerState();
+  if (!profiler?.enabled || !profiler.current) {
+    return;
+  }
+
+  const frame = profiler.current;
+  const cpuMs = frame.updateMs + frame.renderMs;
+  profiler.frameIndex += 1;
+  profiler.windowFrames += 1;
+  profiler.windowCpuMs += cpuMs;
+  profiler.windowUpdateMs += frame.updateMs;
+  profiler.windowRenderMs += frame.renderMs;
+  for (const [key, value] of Object.entries(frame.stages)) {
+    profiler.windowStageMs[key] = (profiler.windowStageMs[key] ?? 0) + value;
+  }
+
+  if (cpuMs > profiler.worstCpuMs) {
+    profiler.worstCpuMs = cpuMs;
+    profiler.worstAt = state.elapsed;
+  }
+
+  profiler.refreshTimer -= TARGET_FRAME_TIME;
+  if (profiler.refreshTimer > 0) {
+    profiler.current = null;
+    return;
+  }
+  profiler.refreshTimer = 0.25;
+
+  const frames = Math.max(1, profiler.windowFrames);
+  profiler.avgCpuMs = profiler.windowCpuMs / frames;
+  profiler.avgUpdateMs = profiler.windowUpdateMs / frames;
+  profiler.avgRenderMs = profiler.windowRenderMs / frames;
+  profiler.avgStageMs = Object.create(null);
+  for (const [key, value] of Object.entries(profiler.windowStageMs)) {
+    profiler.avgStageMs[key] = value / frames;
+  }
+  pushPerformanceRecorderSample(false);
+  profiler.windowFrames = 0;
+  profiler.windowCpuMs = 0;
+  profiler.windowUpdateMs = 0;
+  profiler.windowRenderMs = 0;
+  profiler.windowStageMs = Object.create(null);
+  renderProfilerOverlay();
+  profiler.current = null;
+}
+
+function getProfilerTopStages(limit = 5) {
+  const profiler = getProfilerState();
+  if (!profiler?.enabled) {
+    return [];
+  }
+  return Object.entries(profiler.avgStageMs)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit);
+}
+
+function formatProfilerStageLabel(key) {
+  if (!key || key.length < 3) {
+    return key ?? "";
+  }
+  if (key.startsWith("u:")) {
+    return `U ${key.slice(2)}`;
+  }
+  if (key.startsWith("r:")) {
+    return `R ${key.slice(2)}`;
+  }
+  return key;
+}
+
+function renderProfilerOverlay() {
+  const profiler = getProfilerState();
+  if (!perfProfiler) {
+    return;
+  }
+  if (!profiler?.enabled) {
+    perfProfiler.classList.add("hidden");
+    perfProfiler.textContent = "";
+    return;
+  }
+
+  const budget = profiler.frameBudgetMs || (1000 / TARGET_FPS);
+  const slack = budget - profiler.avgCpuMs;
+  const topStages = getProfilerTopStages(6)
+    .map(([name, value]) => `${formatProfilerStageLabel(name)} ${value.toFixed(2)}ms`)
+    .join(" | ");
+  const lines = [
+    `Profiler F8 | Record F9: ${PERFORMANCE_RECORDER.enabled ? "ON" : "OFF"} | CPU ${profiler.avgCpuMs.toFixed(2)}ms (U ${profiler.avgUpdateMs.toFixed(2)} / R ${profiler.avgRenderMs.toFixed(2)}) | Budget ${budget.toFixed(2)} | Slack ${slack.toFixed(2)}`,
+    `Top: ${topStages || "no samples yet"}`,
+    `Counts: E ${state.enemies.length} | P ${state.projectiles.length} | FX ${state.effects.length} | ATK ${state.enemyAttacks.length} | DMG ${state.damageNumbers.length} | Ally ${state.allies.length}`,
+    `Caches: Terrain ${TERRAIN_TILE_CACHE.size}/${TERRAIN_TILE_CACHE_MAX_ENTRIES} | Regions ${WORLD_FEATURE_CACHE.size}`,
+    `Worst: ${profiler.worstCpuMs.toFixed(2)}ms @ ${formatTime(profiler.worstAt)}`,
+  ];
+  perfProfiler.textContent = lines.join("\n");
+  perfProfiler.classList.remove("hidden");
+}
+
+function resetProfilerStats() {
+  const profiler = getProfilerState();
+  if (!profiler) {
+    return;
+  }
+  profiler.refreshTimer = 0;
+  profiler.frameIndex = 0;
+  profiler.windowFrames = 0;
+  profiler.windowCpuMs = 0;
+  profiler.windowUpdateMs = 0;
+  profiler.windowRenderMs = 0;
+  profiler.windowStageMs = Object.create(null);
+  profiler.avgCpuMs = 0;
+  profiler.avgUpdateMs = 0;
+  profiler.avgRenderMs = 0;
+  profiler.avgStageMs = Object.create(null);
+  profiler.worstCpuMs = 0;
+  profiler.worstAt = 0;
+  profiler.current = null;
+}
+
+function setPerformanceProfilerEnabled(enabled) {
+  if (!enabled && PERFORMANCE_RECORDER.enabled) {
+    return;
+  }
+  const profiler = getProfilerState();
+  if (!profiler) {
+    return;
+  }
+  profiler.enabled = Boolean(enabled);
+  if (profiler.enabled) {
+    resetProfilerStats();
+    renderProfilerOverlay();
+  } else if (perfProfiler) {
+    perfProfiler.classList.add("hidden");
+    perfProfiler.textContent = "";
+  }
+}
+
+function togglePerformanceProfiler(forceState = null) {
+  const profiler = getProfilerState();
+  if (!profiler) {
+    return false;
+  }
+  const next = forceState == null ? !profiler.enabled : Boolean(forceState);
+  setPerformanceProfilerEnabled(next);
+  return next;
+}
+
+function getPerformanceProfilerSnapshot() {
+  const profiler = getProfilerState();
+  if (!profiler) {
+    return null;
+  }
+  return {
+    enabled: profiler.enabled,
+    budgetMs: profiler.frameBudgetMs,
+    avgCpuMs: profiler.avgCpuMs,
+    avgUpdateMs: profiler.avgUpdateMs,
+    avgRenderMs: profiler.avgRenderMs,
+    avgStages: { ...profiler.avgStageMs },
+    worstCpuMs: profiler.worstCpuMs,
+    worstAt: profiler.worstAt,
+    counts: {
+      enemies: state.enemies.length,
+      projectiles: state.projectiles.length,
+      effects: state.effects.length,
+      enemyAttacks: state.enemyAttacks.length,
+      damageNumbers: state.damageNumbers.length,
+      allies: state.allies.length,
+    },
+    caches: {
+      terrainTiles: TERRAIN_TILE_CACHE.size,
+      terrainTilesMax: TERRAIN_TILE_CACHE_MAX_ENTRIES,
+      worldRegions: WORLD_FEATURE_CACHE.size,
+    },
+  };
 }
 
 function getPerformanceTier() {
@@ -2132,13 +2641,25 @@ function update(dt) {
   if (!state?.hudMotion) {
     return;
   }
-  updateHudBarAnimations(dt);
-  updateArchiveToast(dt);
+  const profilerActive = isProfilerEnabled();
+  if (profilerActive) {
+    profileUpdateStage("hudBars", () => updateHudBarAnimations(dt));
+    profileUpdateStage("archiveToast", () => updateArchiveToast(dt));
+  } else {
+    updateHudBarAnimations(dt);
+    updateArchiveToast(dt);
+  }
 
   if (state.runEnd.active) {
-    updateRunEndSequence(dt);
-    updateEffects(dt);
-    cleanupDeadEntities();
+    if (profilerActive) {
+      profileUpdateStage("runEnd", () => updateRunEndSequence(dt));
+      profileUpdateStage("effects", () => updateEffects(dt));
+      profileUpdateStage("cleanup", cleanupDeadEntities);
+    } else {
+      updateRunEndSequence(dt);
+      updateEffects(dt);
+      cleanupDeadEntities();
+    }
     return;
   }
 
@@ -2161,56 +2682,101 @@ function update(dt) {
     window.sfx?.play("heartbeat", { intensity: 0.6 + danger * 0.5 });
   }
 
-  updatePlayerMovement(simDt);
-  updatePlayerRegeneration(simDt);
-  updatePlayerClassBuffs(simDt);
-  updateAutoFire(simDt);
-  updateAutoSkills(simDt);
-  updateProjectiles(simDt);
-  updateEffects(simDt);
-  spawnEnemies(simDt);
-  maybeSpawnBosses();
-  updateEnemiesAndSpatialGrid(simDt);
-  updateAllies(simDt);
-  resolveProjectileEnemyCollisions(state.enemyGrid);
-  resolveAllyEnemyCollisions(state.enemyGrid);
-  updateEnemyAttacks(simDt);
-  resolvePlayerEnemyDamage(simDt, state.enemyGrid);
-  updatePickups(simDt);
-  cleanupDeadEntities();
-  updateArchiveRunProgress(simDt);
+  if (profilerActive) {
+    profileUpdateStage("playerMove", () => updatePlayerMovement(simDt));
+    profileUpdateStage("playerRegen", () => updatePlayerRegeneration(simDt));
+    profileUpdateStage("classBuffs", () => updatePlayerClassBuffs(simDt));
+    profileUpdateStage("autoFire", () => updateAutoFire(simDt));
+    profileUpdateStage("autoSkills", () => updateAutoSkills(simDt));
+    profileUpdateStage("projectiles", () => updateProjectiles(simDt));
+    profileUpdateStage("effects", () => updateEffects(simDt));
+    profileUpdateStage("spawn", () => spawnEnemies(simDt));
+    profileUpdateStage("bossSpawn", maybeSpawnBosses);
+    profileUpdateStage("enemies", () => updateEnemiesAndSpatialGrid(simDt));
+    profileUpdateStage("allies", () => updateAllies(simDt));
+    profileUpdateStage("projVsEnemy", () => resolveProjectileEnemyCollisions(state.enemyGrid));
+    profileUpdateStage("allyVsEnemy", () => resolveAllyEnemyCollisions(state.enemyGrid));
+    profileUpdateStage("enemyAttacks", () => updateEnemyAttacks(simDt));
+    profileUpdateStage("playerDamage", () => resolvePlayerEnemyDamage(simDt, state.enemyGrid));
+    profileUpdateStage("pickups", () => updatePickups(simDt));
+    profileUpdateStage("cleanup", cleanupDeadEntities);
+    profileUpdateStage("archiveProgress", () => updateArchiveRunProgress(simDt));
+  } else {
+    updatePlayerMovement(simDt);
+    updatePlayerRegeneration(simDt);
+    updatePlayerClassBuffs(simDt);
+    updateAutoFire(simDt);
+    updateAutoSkills(simDt);
+    updateProjectiles(simDt);
+    updateEffects(simDt);
+    spawnEnemies(simDt);
+    maybeSpawnBosses();
+    updateEnemiesAndSpatialGrid(simDt);
+    updateAllies(simDt);
+    resolveProjectileEnemyCollisions(state.enemyGrid);
+    resolveAllyEnemyCollisions(state.enemyGrid);
+    updateEnemyAttacks(simDt);
+    resolvePlayerEnemyDamage(simDt, state.enemyGrid);
+    updatePickups(simDt);
+    cleanupDeadEntities();
+    updateArchiveRunProgress(simDt);
+  }
 
   state.hudTimer -= simDt;
   if (state.hudTimer <= 0) {
     state.hudTimer = 0.08;
-    updateHud(state.hudPendingForce);
+    if (profilerActive) {
+      profileUpdateStage("hud", () => updateHud(state.hudPendingForce));
+    } else {
+      updateHud(state.hudPendingForce);
+    }
     state.hudPendingForce = false;
   }
 }
 
 function updatePlayerMovement(dt) {
+  const player = state.player;
   updateDashState(dt);
 
-  if (state.player.dash.activeTimer > 0) {
-    moveCircleEntity(state.player, state.player.dash.vx * dt, state.player.dash.vy * dt, state.player.radius);
+  if (player.dash.activeTimer > 0) {
+    const dashProgress = clamp(1 - player.dash.activeTimer / Math.max(0.0001, player.dash.duration), 0, 1);
+    const dashEase = 1 - dashProgress * 0.52;
+    moveCircleEntity(player, player.dash.vx * dashEase * dt, player.dash.vy * dashEase * dt, player.radius);
     return;
   }
 
   const movement = getMovementAxis();
-  if (movement.x === 0 && movement.y === 0) {
-    return;
+  const hasInput = movement.x !== 0 || movement.y !== 0;
+  let targetVX = 0;
+  let targetVY = 0;
+
+  if (hasInput) {
+    const length = Math.hypot(movement.x, movement.y) || 1;
+    const normalizedX = movement.x / length;
+    const normalizedY = movement.y / length;
+    const haste = player.afterDashBuffTimer > 0 ? 1 + player.afterDashHaste : 1;
+    const windRush = player.windRushTimer > 0 ? 1 + player.windRushBonus : 1;
+    const moveSpeed = player.speed * player.speedMultiplier * haste * windRush;
+    targetVX = normalizedX * moveSpeed;
+    targetVY = normalizedY * moveSpeed;
   }
 
-  const length = Math.hypot(movement.x, movement.y) || 1;
-  const normalizedX = movement.x / length;
-  const normalizedY = movement.y / length;
+  const response = hasInput ? 15.5 : 10.5;
+  const blend = 1 - Math.exp(-response * dt);
+  player.moveVX += (targetVX - player.moveVX) * blend;
+  player.moveVY += (targetVY - player.moveVY) * blend;
 
-  state.player.lastMoveX = normalizedX;
-  state.player.lastMoveY = normalizedY;
-  const haste = state.player.afterDashBuffTimer > 0 ? 1 + state.player.afterDashHaste : 1;
-  const windRush = state.player.windRushTimer > 0 ? 1 + state.player.windRushBonus : 1;
-  const moveSpeed = state.player.speed * state.player.speedMultiplier * haste * windRush;
-  moveCircleEntity(state.player, normalizedX * moveSpeed * dt, normalizedY * moveSpeed * dt, state.player.radius);
+  const moveLength = Math.hypot(player.moveVX, player.moveVY);
+  if (!hasInput && moveLength < 5) {
+    player.moveVX = 0;
+    player.moveVY = 0;
+    return;
+  }
+  if (moveLength > 0.0001) {
+    player.lastMoveX = player.moveVX / moveLength;
+    player.lastMoveY = player.moveVY / moveLength;
+  }
+  moveCircleEntity(player, player.moveVX * dt, player.moveVY * dt, player.radius);
 }
 
 function getMovementAxis() {
@@ -2245,6 +2811,10 @@ function updateDashState(dt) {
   dash.failFlashTimer = Math.max(0, dash.failFlashTimer - dt);
 
   if (dash.activeTimer <= 0) {
+    if (Math.hypot(dash.vx, dash.vy) > 0.0001) {
+      state.player.moveVX = dash.vx * 0.22;
+      state.player.moveVY = dash.vy * 0.22;
+    }
     dash.vx = 0;
     dash.vy = 0;
   }
@@ -2401,6 +2971,8 @@ function tryDash() {
   const speed = dash.distance / dash.duration;
   dash.vx = dirX * speed;
   dash.vy = dirY * speed;
+  player.moveVX = dash.vx * 0.18;
+  player.moveVY = dash.vy * 0.18;
   if (!state.dev.zenMode && dash.charges < dash.maxCharges && dash.rechargeTimer <= 0) {
     dash.rechargeTimer = Math.max(0.85, dash.rechargeTime / (1 + player.dash.rechargeMultiplier));
   }
@@ -7245,9 +7817,7 @@ function createUpgradeMetaMarkup(option) {
   const milestoneMarkup = option.milestone
     ? `<span class="upgrade-family upgrade-family-ascendant">Ascendant</span>`
     : "";
-  const familyMarkup = option.familyLabel
-    ? `<span class="upgrade-family">${option.familyLabel}</span>`
-    : "";
+  const familyMarkup = "";
 
   return `<span class="upgrade-meta-row"><span class="upgrade-meta-left"><span class="upgrade-tier tier-${option.tier}">${option.tier}</span>${milestoneMarkup}${familyMarkup}</span><span class="upgrade-stacks">${getUpgradeStackLabel(option)}</span></span>`;
 }
@@ -7349,19 +7919,6 @@ function onUpgradeRowClick(event) {
   }
 
   applyUpgradeById(row.dataset.upgradeId);
-}
-
-function onCodexTabClick(event) {
-  const button = event.target.closest("[data-codex-tab]");
-  if (!button || state.pause.devMenu) {
-    return;
-  }
-  const nextTab = button.dataset.codexTab;
-  if (!nextTab || state.pause.codexTab === nextTab) {
-    return;
-  }
-  state.pause.codexTab = nextTab;
-  refreshPauseOverlay();
 }
 
 function applyUpgradeById(id) {
@@ -7680,12 +8237,6 @@ function refreshPauseOverlay() {
   renderDevToolsPanel();
   if (!state.pause.devMenu && state.pause.upgradesPanel) {
     renderPauseMeta();
-    for (const button of codexTabButtons) {
-      const active = button.dataset.codexTab === state.pause.codexTab;
-      button.classList.toggle("is-active", active);
-      button.setAttribute("aria-selected", active ? "true" : "false");
-    }
-    codexTabNav?.classList.remove("hidden");
   }
   if (!state.pause.devMenu && state.pause.upgradesPanel) {
     renderUpgradesCodex();
@@ -7694,10 +8245,8 @@ function refreshPauseOverlay() {
     pauseMenuScreen.classList.toggle("hidden", !menuMode || state.pause.devMenu);
   }
   pauseMeta?.classList.toggle("hidden", menuMode && !state.pause.devMenu);
-  codexTabNav?.classList.toggle("hidden", menuMode || state.pause.devMenu);
   upgradesList.classList.toggle("hidden", menuMode || (state.pause.devMenu && state.dev.activeTab !== "skills"));
   if (state.pause.devMenu) {
-    codexTabNav?.classList.add("hidden");
     menuKicker.classList.add("hidden");
     pauseTitle.textContent = "Developer Menu";
     pauseSubtitle.textContent = "Open with / on any layout. Use tabs to inspect upgrades, spawn enemies, tune the character, or switch class. Press / or Esc to resume.";
@@ -7714,8 +8263,8 @@ function refreshPauseOverlay() {
     return;
   }
   menuKicker.textContent = "Codex";
-  pauseTitle.textContent = "Arcane Upgrades";
-  pauseSubtitle.textContent = "Tune your build, review synergies, and return stronger.";
+  pauseTitle.textContent = "Upgrades";
+  pauseSubtitle.textContent = "Review your build and return stronger.";
 }
 
 function toggleUpgradesPanel() {
@@ -8080,12 +8629,37 @@ function renderStartOverlay() {
   startOverlay.classList.toggle("hidden", state.running);
 }
 
-function startRun() {
+async function startRun() {
+  if (state.running || startRunTransitionRunning) {
+    return;
+  }
+  const mask = startRunTransitionMask;
+  if (!mask) {
+    startRunImmediate();
+    return;
+  }
+  const maxRadius = Math.hypot(window.innerWidth, window.innerHeight) * 0.5 + 52;
+  startRunTransitionRunning = true;
+  mask.classList.remove("hidden");
+  mask.classList.add("is-active");
+  try {
+    await animateStartRunTransition(mask, maxRadius, 0, 460, easeInOutQuart);
+    startRunImmediate();
+    await animateStartRunTransition(mask, 0, maxRadius, 560, easeOutQuint);
+  } finally {
+    mask.classList.remove("is-active");
+    mask.classList.add("hidden");
+    startRunTransitionRunning = false;
+  }
+}
+
+function startRunImmediate() {
   const shouldShowHowTo = !hasSeenHowToPlay();
   hideClassHoverTooltip();
   resetTouchControls();
   state = createInitialState(metaProgress.selectedClassId);
   state.running = true;
+  ensurePerformanceRecorderRun();
   startOverlay.classList.add("hidden");
   window.sfx?.play("runStart");
   window.sfx?.startRunMusic?.();
@@ -8094,6 +8668,34 @@ function startRun() {
   if (shouldShowHowTo) {
     openHowToPlay({ firstRun: true });
   }
+}
+
+function easeInOutQuart(t) {
+  return t < 0.5
+    ? 8 * t * t * t * t
+    : 1 - Math.pow(-2 * t + 2, 4) / 2;
+}
+
+function easeOutQuint(t) {
+  return 1 - Math.pow(1 - t, 5);
+}
+
+function animateStartRunTransition(mask, fromRadius, toRadius, durationMs, easing) {
+  return new Promise((resolve) => {
+    const startTime = performance.now();
+    const step = (now) => {
+      const progress = clamp((now - startTime) / durationMs, 0, 1);
+      const eased = easing(progress);
+      const radius = fromRadius + (toRadius - fromRadius) * eased;
+      mask.style.setProperty("--iris-radius", `${radius.toFixed(2)}px`);
+      if (progress >= 1) {
+        resolve();
+        return;
+      }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
 }
 
 function chooseRandomBossType() {
@@ -8123,18 +8725,8 @@ function renderPauseMeta() {
   const items = [
     { label: "Class", value: getClassDef().title },
     { label: "Time", value: formatTime(state.elapsed) },
-    { label: "Level", value: state.progression.level },
     { label: "Kills", value: state.kills },
-    { label: "HP", value: `${Math.round(state.player.hp)} / ${state.player.maxHp}` },
-    { label: "XP", value: `${Math.floor(state.progression.xp)} / ${state.progression.xpToNext}` },
   ];
-
-  if (state.dev.zenMode) {
-    items.push({ label: "Zen", value: "Immortal" });
-  }
-  if (state.dev.playerInvulnerable && !state.dev.zenMode) {
-    items.push({ label: "Guard", value: "Invulnerable" });
-  }
 
   pauseMeta.innerHTML = items
     .map((item) => `<span class="pause-meta-item">${item.label} <strong>${item.value}</strong></span>`)
@@ -8184,12 +8776,13 @@ function renderCodexSection(entries, clickableInDev, title = "", kicker = "", pr
     if (entry.stacks > 0) {
       row.classList.add("has-stack");
     }
-    if (entry.locked) {
+    const visuallyLocked = !clickableInDev && (entry.locked || entry.stacks <= 0);
+    if (visuallyLocked) {
       row.classList.add("locked");
     }
 
     const clickHint = clickableInDev && !entry.isMaxed ? " - Click to add" : "";
-    const statusPrefix = entry.locked ? "&#128274; " : entry.isMaxed ? "&#10003; " : "";
+    const statusPrefix = visuallyLocked ? "&#128274; " : entry.isMaxed ? "&#10003; " : "";
 
     row.innerHTML = [
       `<div class="upgrade-row-icon">${entry.icon}</div>`,
@@ -8211,13 +8804,6 @@ function renderCodexSection(entries, clickableInDev, title = "", kicker = "", pr
 function renderUpgradesCodex() {
   upgradesList.innerHTML = "";
   const clickableInDev = state.pause.devMenu;
-  const archiveChallengeEntries = buildArchiveCodexEntries(ARCHIVE_CHALLENGES, "challenge");
-  const archiveAchievementEntries = buildArchiveCodexEntries(ARCHIVE_ACHIEVEMENTS, "achievement");
-  if (!state.pause.devMenu && state.pause.codexTab === "archive") {
-    renderCodexSection(archiveChallengeEntries, false, "Archive Trials", "Archive");
-    renderCodexSection(archiveAchievementEntries, false, "Achievements", "Achievement");
-    return;
-  }
 
   const ordinaryEntries = MINOR_UPGRADES.map((upgrade) => {
     const stacks = state.upgrades[upgrade.id] ?? 0;
@@ -8272,35 +8858,6 @@ function renderUpgradesCodex() {
   });
 
   renderCodexSection(majorEntries, clickableInDev, "Major Upgrades", "Major");
-
-  const classDef = getClassDef();
-  const skillEntries = classDef.skills.map((skill) => {
-    const skillState = state.player.skills.find((entry) => entry.id === skill.id);
-    const unlockLevel = classDef.skillUnlocks[skill.slot - 1];
-    return {
-      id: skill.id,
-      icon: skill.icon,
-      title: skill.title,
-      description: `${skill.role} slot. ${skill.targeting} targeting.`,
-      tier: skillState?.mastery > 0 ? "legendary" : "uncommon",
-      familyLabel: `Slot ${skill.slot}`,
-      stacks: skillState?.mastery ?? 0,
-      maxStacks: 2,
-      locked: !clickableInDev && !(skillState?.unlocked),
-      isMaxed: (skillState?.mastery ?? 0) >= 2,
-      status: clickableInDev
-        ? !(skillState?.unlocked)
-          ? "Available"
-          : (skillState?.mastery ?? 0) >= 2
-            ? "Maxed"
-            : "Available"
-        : skillState?.unlocked
-          ? `Unlocked - Mastery ${skillState.mastery}/2`
-          : `Unlocks at level ${unlockLevel}`,
-    };
-  });
-
-  renderCodexSection(skillEntries, clickableInDev, `${classDef.title} Skills`, "Class", true);
 
   for (const bossType of BOSS_TYPES) {
     if (!state.bossSeen[bossType]) {

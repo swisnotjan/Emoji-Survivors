@@ -3,7 +3,9 @@ let viewWidth = 960;
 let viewHeight = 540;
 let renderScale = 1;
 
-const FIXED_STEP = 1 / 60;
+const TARGET_FPS = 90;
+const TARGET_FRAME_TIME = 1 / TARGET_FPS;
+const FIXED_STEP = 1 / TARGET_FPS;
 const MAX_FRAME_TIME = 0.12;
 const ENEMY_CELL_SIZE = 72;
 const ENEMY_NEIGHBOR_OFFSETS = [[1, 0], [0, 1], [1, 1], [-1, 1]];
@@ -23,6 +25,12 @@ const WORLD_FEATURE_MARGIN = 280;
 const WORLD_FEATURE_START_CLEAR_RADIUS = 760;
 const WORLD_FEATURE_CACHE = new Map();
 const TERRAIN_TILE_CACHE = new Map();
+const TERRAIN_TILE_CACHE_MAX_ENTRIES = 48000;
+const TERRAIN_TILE_CACHE_OVERFLOW_BUFFER = 2048;
+const TERRAIN_TILE_CACHE_PRUNE_BATCH = 4096;
+const TERRAIN_CACHE_MIN_TILE_X = Math.round(WORLD.left / TERRAIN_TILE_SIZE);
+const TERRAIN_CACHE_MIN_TILE_Y = Math.round(WORLD.top / TERRAIN_TILE_SIZE);
+const TERRAIN_CACHE_TILES_X = Math.round((WORLD.right - WORLD.left) / TERRAIN_TILE_SIZE) + 1;
 const PARTICLE_SPRITE_CACHE = new Map();
 const SOFT_BURST_SPRITE_CACHE = new Map();
 const TERRAIN_CACHE_CANVAS = document.createElement("canvas");
@@ -2442,6 +2450,7 @@ const skillCardElements = Array.from(document.querySelectorAll("[data-skill-slot
   lockBadge: element.querySelector(".skill-lock-badge"),
   icon: element.querySelector(".skill-icon"),
   fill: element.querySelector(".skill-fill"),
+  masteryDots: Array.from(element.querySelectorAll(".skill-mastery-dot")),
 }));
 const skillTooltip = {
   root: document.getElementById("skillTooltip"),
@@ -2534,6 +2543,7 @@ const restartButton = document.getElementById("restartButton");
 const returnMenuButton = document.getElementById("returnMenuButton");
 const gameOverCard = gameOverOverlay.querySelector(".overlay-card");
 const fpsValue = document.getElementById("fpsValue");
+const perfProfiler = document.getElementById("perfProfiler");
 const startOverlay = document.getElementById("startOverlay");
 const classSelectGrid = document.getElementById("classSelectGrid");
 const classPreviewPrev = document.getElementById("classPreviewPrev");
@@ -2547,6 +2557,7 @@ const startMagePanel = document.querySelector(".start-mage-panel");
 const classProgressCard = document.getElementById("classProgressCard");
 const archiveProgressCard = document.getElementById("archiveProgressCard");
 const startRunButton = document.getElementById("startRunButton");
+const startRunTransitionMask = document.getElementById("startRunTransitionMask");
 const startSubtitle = document.getElementById("startSubtitle");
 const audioMixer = document.getElementById("audioMixer");
 const audioMixerButton = document.getElementById("audioMixerButton");
