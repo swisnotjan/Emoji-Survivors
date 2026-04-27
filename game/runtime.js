@@ -3890,6 +3890,8 @@ function createEnemy(enemyType, anchor, index, totalCount, options = {}) {
     airborne: false,
     visualHeight: 0,
     dead: false,
+    aiVx: 0,
+    aiVy: 0,
   };
 }
 
@@ -4005,12 +4007,26 @@ function updateEnemiesAndSpatialGrid(dt) {
 
     const freezeMultiplier = enemy.freezeTimer > 0 ? (enemy.isBoss ? 0.28 : 0) : 1;
     const moveMultiplier = (1 - clamp(enemy.slowAmount, 0, 0.75)) * freezeMultiplier * hasteMultiplier;
-    const phaseBefore = enemy.phase;
     if (moveMultiplier > 0) {
-      updateEnemyBehavior(enemy, dt, moveMultiplier, player);
-    }
-    if (enemy.isBoss && phaseBefore !== enemy.phase) {
-      window.sfx?.play("bossPhase");
+      const edx = enemy.x - player.x;
+      const edy = enemy.y - player.y;
+      const farFromPlayer = edx * edx + edy * edy > 490000; // 700px
+      const skipAI = farFromPlayer && !enemy.isBoss && (state.tick + enemy.id) % 2 !== 0;
+
+      if (skipAI) {
+        moveCircleEntity(enemy, enemy.aiVx * dt, enemy.aiVy * dt, enemy.radius, getEntityCollisionOptions(enemy));
+      } else {
+        const phaseBefore = enemy.phase;
+        const prevX = enemy.x;
+        const prevY = enemy.y;
+        updateEnemyBehavior(enemy, dt, moveMultiplier, player);
+        if (enemy.isBoss && phaseBefore !== enemy.phase) {
+          window.sfx?.play("bossPhase");
+        }
+        const dtSafe = Math.max(dt, 0.0001);
+        enemy.aiVx = (enemy.x - prevX) / dtSafe;
+        enemy.aiVy = (enemy.y - prevY) / dtSafe;
+      }
     }
 
     moveCircleEntity(enemy, enemy.knockbackVX * dt, enemy.knockbackVY * dt, enemy.radius, getEntityCollisionOptions(enemy));
@@ -4033,7 +4049,7 @@ function updateEnemiesAndSpatialGrid(dt) {
 
   const manyEnemies = state.enemies.length >= 110;
   const separationIntensity = manyEnemies && state.tick % 2 === 1 ? 0.6 : 1;
-  applyEnemySeparation(state.enemyGrid, separationIntensity);
+  applyEnemySeparation(state.enemyGrid, separationIntensity, player);
 }
 
 function getEntityCollisionOptions(entity) {
@@ -5611,12 +5627,24 @@ function resolveAllyEnemyCollisions(grid) {
   state.allies = state.allies.filter((ally) => !ally.dead);
 }
 
-function applyEnemySeparation(grid, intensity) {
+function applyEnemySeparation(grid, intensity, player) {
   if (intensity <= 0) {
     return;
   }
 
+  const px = player?.x ?? 0;
+  const py = player?.y ?? 0;
+  const skipFarOddTick = state.tick % 2 !== 0;
+
   for (const cell of grid.cells) {
+    const cellCX = (cell.x + 0.5) * ENEMY_CELL_SIZE;
+    const cellCY = (cell.y + 0.5) * ENEMY_CELL_SIZE;
+    const cdx = cellCX - px;
+    const cdy = cellCY - py;
+    if (cdx * cdx + cdy * cdy > 490000 && skipFarOddTick) {
+      continue;
+    }
+
     resolveSeparationInBucket(cell.enemies, intensity);
 
     for (const [offsetX, offsetY] of ENEMY_NEIGHBOR_OFFSETS) {
