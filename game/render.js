@@ -703,12 +703,21 @@ function drawCircularTelegraph(attack, pos, perfTier = 0) {
     "screen"
   );
 
+  const mainW = 3.2 + telegraph.fill * 2.6;
   ctx.save();
   ctx.lineCap = "round";
-  ctx.shadowBlur = perfTier >= 2 ? 0 : 16 + telegraph.fill * 14;
-  ctx.shadowColor = colorWithAlpha(attack.color, 0.16 + telegraph.fill * 0.22);
+  if (perfTier < 2) {
+    ctx.setLineDash([]);
+    ctx.strokeStyle = colorWithAlpha(attack.color, 0.14 + telegraph.fill * 0.12);
+    ctx.lineWidth = mainW * 3.8;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+  }
   ctx.strokeStyle = colorWithAlpha(attack.color, 0.42 + telegraph.fill * 0.32);
-  ctx.lineWidth = 3.2 + telegraph.fill * 2.6;
+  ctx.lineWidth = mainW;
   ctx.setLineDash([14, 10]);
   ctx.lineDashOffset = dashOffset;
   ctx.beginPath();
@@ -761,12 +770,20 @@ function drawBeamTelegraph(attack, start, end, perfTier = 0) {
     "screen"
   );
 
+  const beamMainW = attack.width * (0.2 + telegraph.fill * 0.12);
   ctx.save();
   ctx.lineCap = "round";
-  ctx.shadowBlur = perfTier >= 2 ? 0 : 18 + telegraph.fill * 12;
-  ctx.shadowColor = colorWithAlpha(attack.color, 0.18 + telegraph.fill * 0.22);
+  if (perfTier < 2) {
+    ctx.setLineDash([]);
+    ctx.strokeStyle = colorWithAlpha(attack.color, 0.14 + telegraph.fill * 0.12);
+    ctx.lineWidth = beamMainW * 3.5;
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+  }
   ctx.strokeStyle = colorWithAlpha(attack.color, 0.48 + telegraph.fill * 0.24);
-  ctx.lineWidth = attack.width * (0.2 + telegraph.fill * 0.12);
+  ctx.lineWidth = beamMainW;
   ctx.setLineDash([22, 12]);
   ctx.lineDashOffset = dashOffset;
   ctx.beginPath();
@@ -1379,8 +1396,9 @@ function drawEffects(layer = "base") {
         ],
         "screen"
       );
-      for (let i = 0; i < 8; i += 1) {
-        const angle = effect.seed2 + state.elapsed * 0.72 + i * (Math.PI * 2 / 8);
+      const runeCount = fxTier >= 2 ? 0 : fxTier >= 1 ? 4 : 8;
+      for (let i = 0; i < runeCount; i += 1) {
+        const angle = effect.seed2 + state.elapsed * 0.72 + i * (Math.PI * 2 / runeCount);
         const drift = 0.88 + Math.sin(state.elapsed * 1.8 + i * 0.9) * 0.08;
         const runeX = pos.x + Math.cos(angle) * radius * (0.26 + (i % 3) * 0.18) * drift;
         const runeY = pos.y + Math.sin(angle * 1.08) * radius * (0.24 + (i % 2) * 0.22) * drift;
