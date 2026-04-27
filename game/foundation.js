@@ -29,10 +29,10 @@ const TERRAIN_CACHE_CANVAS = document.createElement("canvas");
 const TERRAIN_CACHE_CTX = TERRAIN_CACHE_CANVAS.getContext("2d", { alpha: false });
 const GAME_CONFIG = window.GAME_CONFIG ?? {};
 const TERRAIN_PALETTE = GAME_CONFIG.terrainPalette ?? {
-  grass: ["#1e4131", "#2b5642", "#3a6953"],
-  sand: ["#6b5633", "#806744", "#987b55"],
-  stone: ["#46525a", "#57646d", "#69767f"],
-  water: ["#18394e", "#244d66", "#2f617c"],
+  grass: ["#2a472b", "#3e603f", "#4f7950"],
+  sand: ["#7d683c", "#977b49", "#b0935a"],
+  stone: ["#3f4a66", "#556388", "#6a7ca9"],
+  water: ["#14466a", "#1d6392", "#2e84bb"],
 };
 const XP_ORB_VALUES = GAME_CONFIG.xpOrbValues ?? [1, 2, 3, 5, 8, 13, 21, 34, 55];
 const XP_CURVE = GAME_CONFIG.xpCurve ?? {
@@ -1003,7 +1003,7 @@ const CLASS_DEFS = {
     skills: [
       { id: "cinder-halo", title: "Cinder Halo", icon: "\u2604\ufe0f", slot: 1, cooldown: 7.5, role: "Panic", targeting: "self" },
       { id: "sunspot", title: "Sunspot", icon: "\ud83c\udf1e", slot: 2, cooldown: 11.2, role: "Zone", targeting: "cluster" },
-      { id: "ash-comet", title: "Ash Comet", icon: "\u2604", slot: 3, cooldown: 14.6, role: "Signature", targeting: "cluster" },
+      { id: "ash-comet", title: "Ash Comet", icon: "\uD83C\uDF0B", slot: 3, cooldown: 14.6, role: "Signature", targeting: "cluster" },
     ],
   },
   necro: {
@@ -2210,6 +2210,7 @@ const skillCardElements = Array.from(document.querySelectorAll("[data-skill-slot
   root: element,
   slot: Number(element.dataset.skillSlot),
   cooldown: element.querySelector(".skill-cd"),
+  lockBadge: element.querySelector(".skill-lock-badge"),
   icon: element.querySelector(".skill-icon"),
   fill: element.querySelector(".skill-fill"),
 }));
@@ -2220,6 +2221,8 @@ const skillTooltip = {
   meta: document.getElementById("skillTooltipMeta"),
   body: document.getElementById("skillTooltipBody"),
 };
+const miniMapCanvas = document.getElementById("miniMapCanvas");
+const miniMapObjectives = document.getElementById("miniMapObjectives");
 
 const bossHud = {
   root: document.getElementById("bossHud"),
@@ -2256,6 +2259,11 @@ const helpButton = document.getElementById("helpButton");
 const upgradesList = document.getElementById("upgradesList");
 const closeUpgradesButton = document.getElementById("closeUpgradesButton");
 const pauseRestartButton = document.getElementById("pauseRestartButton");
+const pauseMenuScreen = document.getElementById("pauseMenuScreen");
+const menuResumeButton = document.getElementById("menuResumeButton");
+const menuUpgradesButton = document.getElementById("menuUpgradesButton");
+const menuHelpButton = document.getElementById("menuHelpButton");
+const menuEndRunButton = document.getElementById("menuEndRunButton");
 const pausePanel = pauseOverlay.querySelector(".pause-panel");
 const devToolsPanel = document.getElementById("devToolsPanel");
 const devModeSummary = document.getElementById("devModeSummary");
@@ -2300,8 +2308,10 @@ const startOverlay = document.getElementById("startOverlay");
 const classSelectGrid = document.getElementById("classSelectGrid");
 const classPreviewPrev = document.getElementById("classPreviewPrev");
 const classPreviewNext = document.getElementById("classPreviewNext");
+const classPreviewTitle = document.getElementById("classPreviewTitle");
 const classPreviewHero = document.getElementById("classPreviewHero");
 const classPreviewSkills = document.getElementById("classPreviewSkills");
+const mageAmbientCanvas = document.getElementById("mageAmbientCanvas");
 const classThumbStrip = document.getElementById("classThumbStrip");
 const startMagePanel = document.querySelector(".start-mage-panel");
 const classProgressCard = document.getElementById("classProgressCard");
@@ -2316,6 +2326,9 @@ const sfxMuteButton = document.getElementById("sfxMuteButton");
 const musicVolumeSlider = document.getElementById("musicVolumeSlider");
 const sfxVolumeSlider = document.getElementById("sfxVolumeSlider");
 const howToPlayOverlay = document.getElementById("howToPlayOverlay");
+const howToPlayPanel = howToPlayOverlay?.querySelector(".howto-panel");
+const howtoXpCanvas = document.getElementById("howtoXpCanvas");
+const howtoHealCanvas = document.getElementById("howtoHealCanvas");
 const closeHowToButton = document.getElementById("closeHowToButton");
 const archiveToastLayer = document.getElementById("archiveToastLayer");
 const touchControls = document.getElementById("touchControls");

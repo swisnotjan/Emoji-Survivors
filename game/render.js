@@ -1,4 +1,19 @@
 // Rendering, HUD updates, world visuals, shared utilities, and gameplay support helpers.
+const VIGNETTE_CACHE = {
+  width: 0,
+  height: 0,
+  canvas: null,
+};
+const MINIMAP_CACHE = {
+  width: 0,
+  height: 0,
+  key: "",
+  canvas: null,
+};
+const MINIMAP_OBJECTIVES_CACHE = {
+  html: "",
+};
+
 function render() {
   ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
   drawBackground();
@@ -10,10 +25,288 @@ function render() {
   drawEnemyAttacks();
   drawAllies();
   drawEnemies();
+  drawScreenVignette();
   drawDamageNumbers();
   drawBossIndicator();
   drawPlayer();
-  drawScreenVignette();
+}
+
+function ensureVignetteCache() {
+  if (VIGNETTE_CACHE.canvas && VIGNETTE_CACHE.width === viewWidth && VIGNETTE_CACHE.height === viewHeight) {
+    return;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = viewWidth;
+  canvas.height = viewHeight;
+  const cacheCtx = canvas.getContext("2d");
+
+  const centerX = viewWidth * 0.5;
+  const centerY = viewHeight * 0.5;
+  const minSide = Math.min(viewWidth, viewHeight);
+  const maxSide = Math.max(viewWidth, viewHeight);
+
+  const warmCenter = cacheCtx.createRadialGradient(
+    centerX,
+    centerY,
+    minSide * 0.03,
+    centerX,
+    centerY,
+    minSide * 0.48
+  );
+  warmCenter.addColorStop(0, "rgba(255, 170, 74, 0.58)");
+  warmCenter.addColorStop(0.22, "rgba(247, 152, 58, 0.32)");
+  warmCenter.addColorStop(0.46, "rgba(232, 146, 56, 0.14)");
+  warmCenter.addColorStop(1, "rgba(0, 0, 0, 0)");
+  cacheCtx.fillStyle = warmCenter;
+  cacheCtx.fillRect(0, 0, viewWidth, viewHeight);
+
+  const coolEdges = cacheCtx.createRadialGradient(
+    centerX,
+    centerY,
+    minSide * 0.12,
+    centerX,
+    centerY,
+    maxSide * 0.9
+  );
+  coolEdges.addColorStop(0, "rgba(0, 0, 0, 0)");
+  coolEdges.addColorStop(0.24, "rgba(10, 27, 78, 0.5)");
+  coolEdges.addColorStop(0.44, "rgba(7, 20, 66, 0.86)");
+  coolEdges.addColorStop(0.7, "rgba(4, 12, 42, 0.95)");
+  coolEdges.addColorStop(1, "rgba(0, 0, 0, 0.94)");
+  cacheCtx.fillStyle = coolEdges;
+  cacheCtx.fillRect(0, 0, viewWidth, viewHeight);
+
+  VIGNETTE_CACHE.width = viewWidth;
+  VIGNETTE_CACHE.height = viewHeight;
+  VIGNETTE_CACHE.canvas = canvas;
+}
+
+function worldToMiniMap(worldX, worldY, width, height, bounds) {
+  const xRatio = (worldX - bounds.left) / Math.max(1, bounds.right - bounds.left);
+  const yRatio = (worldY - bounds.top) / Math.max(1, bounds.bottom - bounds.top);
+  return {
+    x: xRatio * width,
+    y: yRatio * height,
+  };
+}
+
+function getMiniMapBounds() {
+  const zoom = getCameraZoom();
+  const screenHeightWorld = viewHeight * zoom;
+  const span = clamp(screenHeightWorld * 1.15, 240, 760);
+  const worldWidth = WORLD.right - WORLD.left;
+  const worldHeight = WORLD.bottom - WORLD.top;
+  const spanX = Math.min(span, worldWidth);
+  const spanY = Math.min(span, worldHeight);
+  const left = clamp(state.player.x - spanX * 0.5, WORLD.left, WORLD.right - spanX);
+  const top = clamp(state.player.y - spanY * 0.5, WORLD.top, WORLD.bottom - spanY);
+  return {
+    left,
+    top,
+    right: left + spanX,
+    bottom: top + spanY,
+  };
+}
+
+function ensureMiniMapCache(width, height, bounds) {
+  const key = [
+    width,
+    height,
+    Math.round(bounds.left / 48),
+    Math.round(bounds.top / 48),
+    Math.round((bounds.right - bounds.left) / 16),
+    Math.round((bounds.bottom - bounds.top) / 16),
+  ].join(":");
+  if (MINIMAP_CACHE.canvas && MINIMAP_CACHE.width === width && MINIMAP_CACHE.height === height && MINIMAP_CACHE.key === key) {
+    return;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const cacheCtx = canvas.getContext("2d");
+  if (!cacheCtx) {
+    return;
+  }
+  cacheCtx.imageSmoothingEnabled = false;
+  cacheCtx.clearRect(0, 0, width, height);
+  cacheCtx.fillStyle = "#050914";
+  cacheCtx.fillRect(0, 0, width, height);
+
+  const sampleStep = 4;
+  for (let py = 0; py < height; py += sampleStep) {
+    for (let px = 0; px < width; px += sampleStep) {
+      const worldX = bounds.left + ((px + 0.5) / width) * (bounds.right - bounds.left);
+      const worldY = bounds.top + ((py + 0.5) / height) * (bounds.bottom - bounds.top);
+      const terrain = getTerrainTileBase(worldX, worldY);
+      let color = "#141b14";
+      if (terrain.type === "water") {
+        color = "#0c2235";
+      } else if (terrain.type === "sand") {
+        color = "#332a1c";
+      } else if (terrain.type === "stone") {
+        color = "#232b3b";
+      }
+      cacheCtx.fillStyle = color;
+      cacheCtx.fillRect(px, py, sampleStep, sampleStep);
+    }
+  }
+
+  cacheCtx.strokeStyle = "rgba(220, 232, 255, 0.78)";
+  cacheCtx.lineWidth = 2;
+  cacheCtx.strokeRect(1, 1, width - 2, height - 2);
+
+  MINIMAP_CACHE.width = width;
+  MINIMAP_CACHE.height = height;
+  MINIMAP_CACHE.key = key;
+  MINIMAP_CACHE.canvas = canvas;
+}
+
+function drawMiniMap() {
+  if (!miniMapCanvas) {
+    return;
+  }
+  const cssWidth = Math.max(120, Math.round(miniMapCanvas.clientWidth || miniMapCanvas.width || 196));
+  const cssHeight = Math.max(120, Math.round(miniMapCanvas.clientHeight || miniMapCanvas.height || 196));
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const pixelWidth = Math.max(1, Math.round(cssWidth * dpr));
+  const pixelHeight = Math.max(1, Math.round(cssHeight * dpr));
+  if (miniMapCanvas.width !== pixelWidth || miniMapCanvas.height !== pixelHeight) {
+    miniMapCanvas.width = pixelWidth;
+    miniMapCanvas.height = pixelHeight;
+  }
+
+  const miniCtx = miniMapCanvas.getContext("2d");
+  if (!miniCtx) {
+    return;
+  }
+  const miniBounds = getMiniMapBounds();
+  miniCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  miniCtx.imageSmoothingEnabled = false;
+  ensureMiniMapCache(cssWidth, cssHeight, miniBounds);
+  miniCtx.clearRect(0, 0, cssWidth, cssHeight);
+  if (MINIMAP_CACHE.canvas) {
+    miniCtx.drawImage(MINIMAP_CACHE.canvas, 0, 0, cssWidth, cssHeight);
+  }
+
+  const zoom = getCameraZoom();
+  const halfViewWorldWidth = viewWidth * 0.5 * zoom;
+  const halfViewWorldHeight = viewHeight * 0.5 * zoom;
+  const topLeft = worldToMiniMap(state.player.x - halfViewWorldWidth, state.player.y - halfViewWorldHeight, cssWidth, cssHeight, miniBounds);
+  const bottomRight = worldToMiniMap(state.player.x + halfViewWorldWidth, state.player.y + halfViewWorldHeight, cssWidth, cssHeight, miniBounds);
+  miniCtx.strokeStyle = "rgba(199, 219, 255, 0.72)";
+  miniCtx.lineWidth = 1;
+  miniCtx.strokeRect(
+    Math.floor(topLeft.x) + 0.5,
+    Math.floor(topLeft.y) + 0.5,
+    Math.max(2, Math.floor(bottomRight.x - topLeft.x)),
+    Math.max(2, Math.floor(bottomRight.y - topLeft.y))
+  );
+
+  const enemyCount = state.enemies.length;
+  const maxMarkers = 320;
+  const enemyStep = Math.max(1, Math.ceil(enemyCount / maxMarkers));
+  for (let i = 0; i < enemyCount; i += enemyStep) {
+    const enemy = state.enemies[i];
+    if (!enemy || enemy.dead) {
+      continue;
+    }
+    const point = worldToMiniMap(enemy.x, enemy.y, cssWidth, cssHeight, miniBounds);
+    if (point.x < 0 || point.x > cssWidth || point.y < 0 || point.y > cssHeight) {
+      continue;
+    }
+    miniCtx.fillStyle = enemy.isBoss ? "#ff8ed9" : "#ff6d6d";
+    const size = enemy.isBoss ? 7 : 5;
+    miniCtx.fillRect(Math.round(point.x - size * 0.5), Math.round(point.y - size * 0.5), size, size);
+  }
+
+  const edgeTopLeft = worldToMiniMap(WORLD.left, WORLD.top, cssWidth, cssHeight, miniBounds);
+  const edgeBottomRight = worldToMiniMap(WORLD.right, WORLD.bottom, cssWidth, cssHeight, miniBounds);
+  miniCtx.strokeStyle = "rgba(196, 216, 255, 0.88)";
+  miniCtx.lineWidth = 1;
+  miniCtx.strokeRect(
+    Math.floor(clamp(edgeTopLeft.x, 0, cssWidth)) + 0.5,
+    Math.floor(clamp(edgeTopLeft.y, 0, cssHeight)) + 0.5,
+    Math.max(2, Math.floor(clamp(edgeBottomRight.x, 0, cssWidth) - clamp(edgeTopLeft.x, 0, cssWidth))),
+    Math.max(2, Math.floor(clamp(edgeBottomRight.y, 0, cssHeight) - clamp(edgeTopLeft.y, 0, cssHeight)))
+  );
+
+  const playerPoint = worldToMiniMap(state.player.x, state.player.y, cssWidth, cssHeight, miniBounds);
+  miniCtx.fillStyle = "#9ef3ff";
+  miniCtx.fillRect(Math.round(playerPoint.x - 2), Math.round(playerPoint.y - 2), 4, 4);
+  miniCtx.strokeStyle = "#dcfaff";
+  miniCtx.lineWidth = 1;
+  miniCtx.strokeRect(Math.round(playerPoint.x - 3) + 0.5, Math.round(playerPoint.y - 3) + 0.5, 6, 6);
+}
+
+function updateMiniMapObjectives() {
+  if (!miniMapObjectives) {
+    return;
+  }
+  if (!state.running) {
+    if (MINIMAP_OBJECTIVES_CACHE.html) {
+      MINIMAP_OBJECTIVES_CACHE.html = "";
+      miniMapObjectives.innerHTML = "";
+    }
+    return;
+  }
+  const pending = ARCHIVE_CHALLENGES.filter((challenge) => !hasCompletedArchiveChallenge(challenge.id, metaProgress));
+  const currentClassId = state.player.classId;
+  const classPriority = pending.filter((challenge) => challenge.classId === currentClassId);
+  const fallback = pending.filter((challenge) => challenge.classId !== currentClassId);
+  const pinned = [...classPriority, ...fallback].slice(0, 2);
+  const groups = [];
+
+  const nextClassId = getCurrentUnlockTargetId(metaProgress);
+  const nextClassDef = nextClassId ? CLASS_DEFS[nextClassId] : null;
+  const nextClassReq = nextClassId ? CLASS_UNLOCK_REQUIREMENTS[nextClassId] : null;
+  if (nextClassId && nextClassDef && nextClassReq) {
+    const isTargetActive = metaProgress.unlockState?.targetClassId === nextClassId;
+    const xpCurrent = isTargetActive ? Math.min(nextClassReq.xp, Math.max(0, metaProgress.unlockState?.xp ?? 0)) : 0;
+    const killsCurrent = isTargetActive ? Math.min(nextClassReq.enemyKills, Math.max(0, metaProgress.unlockState?.kills ?? 0)) : 0;
+    const ratio = clamp(
+      ((xpCurrent / Math.max(1, nextClassReq.xp)) + (killsCurrent / Math.max(1, nextClassReq.enemyKills))) * 0.5,
+      0,
+      1
+    );
+    groups.push([
+      `<section class="mini-map-objective-group">`,
+      `<header class="mini-map-objective-group-head"><span class="mini-map-objective-group-kicker">Next Mage</span></header>`,
+      `<div class="mini-map-objective-row mini-map-objective-row-mage">`,
+      `<div class="mini-map-objective-head"><span class="mini-map-objective-icon">${nextClassDef.icon ?? "🧙"}</span><strong>Unlock ${nextClassDef.title}</strong></div>`,
+      `<span class="mini-map-objective-status">XP ${Math.floor(xpCurrent)} / ${nextClassReq.xp} · ${formatEnemyTypeLabel(nextClassReq.enemyType)} ${Math.floor(killsCurrent)} / ${nextClassReq.enemyKills}</span>`,
+      `<div class="mini-map-objective-track"><div class="mini-map-objective-fill" style="width:${(ratio * 100).toFixed(1)}%"></div></div>`,
+      `</div>`,
+      `</section>`,
+    ].join(""));
+  }
+
+  const archiveRows = pinned.length
+    ? pinned.map((challenge) => {
+        const status = getArchiveChallengeStatus(challenge);
+        const current = getArchiveChallengeCurrentValue(challenge.id);
+        const ratio = challenge.target ? clamp(current / Math.max(1, challenge.target), 0, 1) : hasCompletedArchiveChallenge(challenge.id) ? 1 : 0;
+        return [
+          `<div class="mini-map-objective-row">`,
+          `<div class="mini-map-objective-head"><span class="mini-map-objective-icon">${challenge.icon ?? "✦"}</span><strong>${challenge.title}</strong></div>`,
+          `<span class="mini-map-objective-status">${status}</span>`,
+          `<div class="mini-map-objective-track"><div class="mini-map-objective-fill" style="width:${(ratio * 100).toFixed(1)}%"></div></div>`,
+          `</div>`,
+        ].join("");
+      }).join("")
+    : `<div class="mini-map-objective-row is-complete"><span class="mini-map-objective-status">All archive challenges complete.</span></div>`;
+  groups.push([
+    `<section class="mini-map-objective-group">`,
+    `<header class="mini-map-objective-group-head"><span class="mini-map-objective-group-kicker">Archive Objectives</span></header>`,
+    archiveRows,
+    `</section>`,
+  ].join(""));
+  const html = groups.join("");
+  if (html !== MINIMAP_OBJECTIVES_CACHE.html) {
+    MINIMAP_OBJECTIVES_CACHE.html = html;
+    miniMapObjectives.innerHTML = html;
+  }
 }
 
 function ensureTerrainRenderCache(zoom, startWorldX, startWorldY, endWorldX, endWorldY) {
@@ -43,7 +336,7 @@ function ensureTerrainRenderCache(zoom, startWorldX, startWorldY, endWorldX, end
   TERRAIN_CACHE_CANVAS.height = Math.max(1, lastTileY + drawSize + 2);
 
   TERRAIN_CACHE_CTX.clearRect(0, 0, TERRAIN_CACHE_CANVAS.width, TERRAIN_CACHE_CANVAS.height);
-  TERRAIN_CACHE_CTX.fillStyle = "#0f1a15";
+  TERRAIN_CACHE_CTX.fillStyle = "#111629";
   TERRAIN_CACHE_CTX.fillRect(0, 0, TERRAIN_CACHE_CANVAS.width, TERRAIN_CACHE_CANVAS.height);
   terrainRenderCache.waterTiles = [];
 
@@ -92,7 +385,7 @@ function drawBackground() {
   ctx.rect(worldTopLeft.x, worldTopLeft.y, worldWidth, worldHeight);
   ctx.clip();
 
-  ctx.fillStyle = "#0f1a15";
+  ctx.fillStyle = "#141b30";
   ctx.fillRect(0, 0, viewWidth, viewHeight);
 
   const tileSize = TERRAIN_TILE_SIZE;
@@ -1977,7 +2270,6 @@ function drawEnemies() {
     const drawX = pos.x;
     const drawY = pos.y - visualHeight;
     const jumpScale = visualHeight > 0 ? 1 + Math.min(0.18, visualHeight / 900) : 1;
-
     const font = ENEMY_ARCHETYPES[enemy.type].font;
     if (font !== activeFont) {
       ctx.font = font;
@@ -2112,10 +2404,12 @@ function drawAllies() {
     const alpha = clamp(ally.life / ally.maxLife, 0.3, 1);
     const tint = ally.tint ?? "rgba(220, 203, 255, {a})";
     const shadowTint = ally.shadowTint ?? "rgba(195, 151, 255, {a})";
+    ctx.save();
     ctx.fillStyle = tint.replace("{a}", alpha.toFixed(3));
     ctx.shadowBlur = 12;
     ctx.shadowColor = shadowTint.replace("{a}", (0.35 + alpha * 0.2).toFixed(3));
     ctx.fillText(ally.emoji, pos.x, pos.y);
+    ctx.restore();
   }
   ctx.restore();
 }
@@ -2242,10 +2536,10 @@ function drawDamageNumbers() {
 
 function drawScreenVignette() {
   const perfTier = getPerformanceTier();
+  ensureVignetteCache();
   ctx.save();
-  ctx.globalAlpha = perfTier >= 2 ? 0.16 : 0.22;
-  ctx.fillStyle = screenVignetteGradient;
-  ctx.fillRect(0, 0, viewWidth, viewHeight);
+  ctx.globalAlpha = perfTier >= 2 ? 0.82 : 0.88;
+  ctx.drawImage(VIGNETTE_CACHE.canvas, 0, 0);
   ctx.restore();
 
   const hpRatio = clamp(state.player.hp / state.player.maxHp, 0, 1);
@@ -2258,9 +2552,7 @@ function drawScreenVignette() {
   }
 
   ctx.save();
-  ctx.globalAlpha = perfTier >= 2
-    ? 0.08 + totalGlow * 0.22
-    : 0.16 + totalGlow * 0.34;
+  ctx.globalAlpha = perfTier >= 2 ? 0.08 + totalGlow * 0.2 : 0.14 + totalGlow * 0.28;
   ctx.fillStyle = hurtVignetteGradient;
   ctx.fillRect(0, 0, viewWidth, viewHeight);
   ctx.restore();
@@ -2293,7 +2585,7 @@ function drawScreenVignette() {
 function getCameraZoom() {
   const runEnd = state.runEnd;
   const deathProgress = runEnd.active ? clamp(runEnd.timer / runEnd.duration, 0, 1) : 0;
-  return 0.92 + deathProgress * 0.42;
+  return 0.78 + deathProgress * 0.36;
 }
 
 function worldToScreen(worldX, worldY) {
@@ -2367,6 +2659,9 @@ function updateHud(force) {
   if (force || state.hudCache.time !== nextTime) {
     state.hudCache.time = nextTime;
     hud.time.textContent = nextTime;
+    if (!force) {
+      retriggerValuePulse(hud.time);
+    }
   }
 
   if (force || state.hudCache.level !== nextLevel) {
@@ -2452,6 +2747,8 @@ function updateHud(force) {
   updateDashHud();
   updateSkillHud();
   updateBossHud(force);
+  drawMiniMap();
+  updateMiniMapObjectives();
 }
 
 function updateDashHud() {
@@ -2542,6 +2839,7 @@ function updateSkillHud() {
 
     card.icon.textContent = skillDef.icon;
     card.fill.style.height = `${(progress * 100).toFixed(1)}%`;
+    card.lockBadge?.classList.toggle("is-visible", !skillState.unlocked);
     card.root.dataset.tooltipIcon = skillDef.icon;
     card.root.dataset.tooltipTitle = skillDef.title;
     card.root.dataset.tooltipMeta = `Slot ${card.slot} - ${skillDef.role} - ${formatTargetingLabel(skillDef.targeting)}`;
@@ -2550,7 +2848,7 @@ function updateSkillHud() {
       : `${SKILL_SUMMARIES[skillDef.id] ?? skillDef.title}. Cooldown ${cooldown.toFixed(1)}s.${skillState.mastery > 0 ? ` Mastery ${skillState.mastery}/2.` : ""}`;
 
     if (!skillState.unlocked) {
-      card.cooldown.textContent = `Lv ${unlockLevel}`;
+      card.cooldown.textContent = "";
       continue;
     }
 
@@ -3538,11 +3836,11 @@ function getTerrainTileBase(worldX, worldY) {
   );
 
   const tintNoise = hash2D(worldX * 0.16, worldY * 0.16, seed + 287) * 2 - 1;
-  const tintColor = tintNoise > 0 ? "rgb(134, 120, 92)" : "rgb(84, 110, 113)";
-  fill = mixHexColor(fill, tintColor, 0.02 + Math.abs(tintNoise) * 0.045);
+  const tintColor = tintNoise > 0 ? "rgb(136, 106, 56)" : "rgb(56, 96, 168)";
+  fill = mixHexColor(fill, tintColor, 0.032 + Math.abs(tintNoise) * 0.058);
   fill = shadeColor(fill, (detailNoise - 0.5) * 0.1 + (materialNoise - 0.5) * 0.06);
 
-  let speckColor = terrainType === "sand" ? "rgba(108, 86, 44, {a})" : terrainType === "stone" ? "rgba(66, 76, 84, {a})" : "rgba(76, 104, 86, {a})";
+  let speckColor = terrainType === "sand" ? "rgba(136, 104, 46, {a})" : terrainType === "stone" ? "rgba(72, 92, 136, {a})" : "rgba(88, 120, 96, {a})";
   const microContrast = (hash2D(worldX * 0.18, worldY * 0.18, seed + 287) - 0.5) * 0.26;
   fill = shadeColor(fill, microContrast * 0.38);
   let speckAlpha = materialNoise > 0.7 ? 0.022 + materialNoise * 0.03 : 0;
@@ -3569,7 +3867,7 @@ function getTerrainTileBase(worldX, worldY) {
 
   if (waterDepth > 0.06) {
     terrainType = "water";
-    speckColor = "rgba(180, 224, 246, {a})";
+    speckColor = "rgba(132, 206, 255, {a})";
     speckAlpha = 0.01 + waterDepth * 0.018;
     const waterBlend = clamp(0.08 + detailNoise * 0.32 + waterDepth * 0.58, 0, 1);
     const waterColor = waterBlend < 0.5

@@ -734,6 +734,19 @@ let classHoverTooltipElement = null;
 let audioMixerCloseTimer = null;
 let lastMusicUiVolume = 0.5;
 let lastSfxUiVolume = 0.5;
+let pauseMenuEndRunConfirm = false;
+let pauseMenuEndRunConfirmTimer = null;
+let howtoPickupPreviewFrame = 0;
+let howtoPickupPreviewStart = 0;
+let mageAmbientAnimFrame = 0;
+let mageAmbientLastTime = 0;
+const mageAmbientState = {
+  classId: "wind",
+  particles: [],
+  pointerScreenX: window.innerWidth * 0.5,
+  pointerScreenY: window.innerHeight * 0.26,
+  windX: 0,
+};
 
 function cancelAudioMixerClose() {
   if (audioMixerCloseTimer) {
@@ -761,6 +774,302 @@ function queueAudioMixerClose() {
   }, 220);
 }
 
+function clearPauseMenuEndRunConfirm() {
+  if (pauseMenuEndRunConfirmTimer) {
+    clearTimeout(pauseMenuEndRunConfirmTimer);
+    pauseMenuEndRunConfirmTimer = null;
+  }
+  pauseMenuEndRunConfirm = false;
+  if (menuEndRunButton) {
+    menuEndRunButton.textContent = "End Run";
+    menuEndRunButton.classList.remove("is-confirming");
+  }
+}
+
+function requestPauseMenuEndRunConfirm() {
+  if (!menuEndRunButton) {
+    return;
+  }
+  pauseMenuEndRunConfirm = true;
+  menuEndRunButton.textContent = "You sure?";
+  menuEndRunButton.classList.add("is-confirming");
+  if (pauseMenuEndRunConfirmTimer) {
+    clearTimeout(pauseMenuEndRunConfirmTimer);
+  }
+  pauseMenuEndRunConfirmTimer = setTimeout(() => {
+    clearPauseMenuEndRunConfirm();
+  }, 2800);
+}
+
+function parseRgbaChannels(color, fallback = [190, 200, 255]) {
+  const match = String(color ?? "").match(/rgba?\((\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/i);
+  if (!match) {
+    return fallback;
+  }
+  return [
+    clamp(Number(match[1]), 0, 255),
+    clamp(Number(match[2]), 0, 255),
+    clamp(Number(match[3]), 0, 255),
+  ];
+}
+
+function toRgba(color, alpha) {
+  const [r, g, b] = parseRgbaChannels(color);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function resizeMageAmbientCanvas() {
+  if (!mageAmbientCanvas) {
+    return;
+  }
+  const rect = mageAmbientCanvas.getBoundingClientRect();
+  const width = Math.max(1, Math.round(rect.width));
+  const height = Math.max(1, Math.round(rect.height));
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const pixelWidth = Math.max(1, Math.round(width * dpr));
+  const pixelHeight = Math.max(1, Math.round(height * dpr));
+  if (mageAmbientCanvas.width === pixelWidth && mageAmbientCanvas.height === pixelHeight) {
+    return;
+  }
+  mageAmbientCanvas.width = pixelWidth;
+  mageAmbientCanvas.height = pixelHeight;
+}
+
+function createMageAmbientParticle(width, height) {
+  return {
+    x: Math.random() * width,
+    y: Math.random() * height,
+    vx: randRange(-10, 10),
+    vy: randRange(28, 74),
+    size: Math.random() < 0.22 ? 3 : 2,
+    phase: Math.random() * Math.PI * 2,
+    phaseSpeed: randRange(0.8, 1.9),
+    colorIndex: Math.floor(Math.random() * 3),
+  };
+}
+
+function syncMageAmbientParticlePool(width, height) {
+  const particleCount = 58;
+  while (mageAmbientState.particles.length < particleCount) {
+    mageAmbientState.particles.push(createMageAmbientParticle(width, height));
+  }
+  if (mageAmbientState.particles.length > particleCount) {
+    mageAmbientState.particles.length = particleCount;
+  }
+}
+
+function drawMageAmbient(nowMs) {
+  if (!mageAmbientCanvas) {
+    return;
+  }
+  if (!mageAmbientAnimFrame) {
+    return;
+  }
+  mageAmbientAnimFrame = requestAnimationFrame(drawMageAmbient);
+  if (!startOverlay || startOverlay.classList.contains("hidden")) {
+    mageAmbientLastTime = nowMs;
+    return;
+  }
+
+  resizeMageAmbientCanvas();
+  const ctx2d = mageAmbientCanvas.getContext("2d");
+  if (!ctx2d) {
+    return;
+  }
+  const cssWidth = Math.max(1, mageAmbientCanvas.clientWidth);
+  const cssHeight = Math.max(1, mageAmbientCanvas.clientHeight);
+  if (cssWidth < 2 || cssHeight < 2) {
+    return;
+  }
+  syncMageAmbientParticlePool(cssWidth, cssHeight);
+  if (!Number.isFinite(mageAmbientLastTime) || mageAmbientLastTime <= 0) {
+    mageAmbientLastTime = nowMs;
+  }
+  const dt = clamp((nowMs - mageAmbientLastTime) / 1000, 0.001, 0.05);
+  mageAmbientLastTime = nowMs;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx2d.imageSmoothingEnabled = false;
+
+  const palette = getClassThemePalette(mageAmbientState.classId);
+  const isWindTheme = mageAmbientState.classId === "wind";
+  const topGlow = toRgba(palette.a, isWindTheme ? 0.38 : 0.26);
+  const centerGlow = toRgba(palette.b, isWindTheme ? 0.24 : 0.16);
+  const bottomFade = "rgba(14, 16, 25, 0)";
+  const backgroundGradient = ctx2d.createLinearGradient(0, 0, 0, cssHeight);
+  backgroundGradient.addColorStop(0, topGlow);
+  backgroundGradient.addColorStop(0.48, centerGlow);
+  backgroundGradient.addColorStop(1, bottomFade);
+  ctx2d.clearRect(0, 0, cssWidth, cssHeight);
+  ctx2d.fillStyle = backgroundGradient;
+  ctx2d.fillRect(0, 0, cssWidth, cssHeight);
+
+  const pointerRatio = clamp(mageAmbientState.pointerScreenX / Math.max(1, window.innerWidth), 0, 1);
+  const targetWindX = (pointerRatio - 0.5) * 56;
+  mageAmbientState.windX += (targetWindX - mageAmbientState.windX) * Math.min(1, dt * 2.1);
+
+  const particleColors = [
+    toRgba(palette.a, 0.88),
+    toRgba(palette.b, 0.82),
+    toRgba(palette.c, 0.74),
+  ];
+
+  for (const particle of mageAmbientState.particles) {
+    particle.phase += dt * particle.phaseSpeed * 2.4;
+    const flutterX = Math.cos(particle.phase) * 16 + Math.sin(particle.phase * 0.47) * 8;
+    particle.vx += (mageAmbientState.windX - particle.vx) * Math.min(1, dt * 1.9);
+    particle.x += (particle.vx + flutterX) * dt;
+    particle.y += particle.vy * dt;
+    if (particle.x < -12) particle.x = cssWidth + randRange(2, 18);
+    if (particle.x > cssWidth + 12) particle.x = -randRange(2, 18);
+    if (particle.y > cssHeight + 10) {
+      particle.y = -randRange(2, 22);
+      particle.x = Math.random() * cssWidth;
+      particle.vy = randRange(28, 74);
+      particle.phase = Math.random() * Math.PI * 2;
+    }
+    ctx2d.fillStyle = particleColors[particle.colorIndex] ?? particleColors[0];
+    ctx2d.fillRect(Math.round(particle.x), Math.round(particle.y), particle.size, particle.size);
+  }
+}
+
+function setMageAmbientClassTheme(classId) {
+  mageAmbientState.classId = classId || "wind";
+}
+
+function onMageAmbientPointerMove(event) {
+  mageAmbientState.pointerScreenX = event.clientX;
+  mageAmbientState.pointerScreenY = event.clientY;
+}
+
+function startMageAmbientEffect() {
+  if (!mageAmbientCanvas || mageAmbientAnimFrame) {
+    return;
+  }
+  resizeMageAmbientCanvas();
+  mageAmbientState.windX = 0;
+  mageAmbientLastTime = 0;
+  mageAmbientAnimFrame = requestAnimationFrame(drawMageAmbient);
+}
+
+function drawHowtoPickupPreview(canvas, type, timeSec) {
+  if (!canvas) {
+    return;
+  }
+  const ctx2d = canvas.getContext("2d");
+  if (!ctx2d) {
+    return;
+  }
+  const cssSize = Math.max(32, Math.round(canvas.clientWidth || canvas.width || 84));
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const pixelSize = Math.max(1, Math.round(cssSize * dpr));
+  if (canvas.width !== pixelSize || canvas.height !== pixelSize) {
+    canvas.width = pixelSize;
+    canvas.height = pixelSize;
+  }
+
+  const center = cssSize * 0.5;
+  const bobOffset = Math.sin(timeSec * 2.4) * 4;
+  const isXp = type === "xp-orb";
+  const coreColor = isXp ? "rgba(255, 214, 92, 0.96)" : "rgba(87, 244, 167, 0.94)";
+  const glowColor = isXp ? "rgba(255, 225, 128, 0.4)" : "rgba(126, 255, 183, 0.32)";
+  const crossColor = isXp ? "rgba(255, 252, 233, 0.82)" : "rgba(231, 255, 241, 0.92)";
+  const auraColor = isXp ? "rgba(255, 214, 92, 0.18)" : "rgba(107, 255, 178, 0.16)";
+  const scale = cssSize / 84;
+
+  ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx2d.clearRect(0, 0, cssSize, cssSize);
+
+  ctx2d.save();
+  ctx2d.globalAlpha = 0.45;
+  ctx2d.fillStyle = "rgba(6, 12, 10, 0.32)";
+  ctx2d.beginPath();
+  ctx2d.ellipse(center, center + 18 * scale, isXp ? 8 * scale : 11 * scale, 5 * scale, 0, 0, Math.PI * 2);
+  ctx2d.fill();
+  ctx2d.restore();
+
+  ctx2d.save();
+  ctx2d.fillStyle = auraColor;
+  ctx2d.beginPath();
+  ctx2d.arc(center, center + bobOffset, (isXp ? 11 : 16) * scale, 0, Math.PI * 2);
+  ctx2d.fill();
+  ctx2d.restore();
+
+  ctx2d.save();
+  ctx2d.translate(center, center + bobOffset);
+  ctx2d.rotate(isXp ? 0 : Math.PI * 0.25);
+  ctx2d.fillStyle = coreColor;
+  ctx2d.shadowBlur = 18 * scale;
+  ctx2d.shadowColor = glowColor;
+  if (isXp) {
+    ctx2d.beginPath();
+    ctx2d.arc(0, 0, 6.2 * scale, 0, Math.PI * 2);
+    ctx2d.fill();
+  } else {
+    ctx2d.fillRect(-9 * scale, -9 * scale, 18 * scale, 18 * scale);
+  }
+  ctx2d.restore();
+
+  ctx2d.save();
+  ctx2d.fillStyle = crossColor;
+  if (isXp) {
+    ctx2d.beginPath();
+    ctx2d.arc(center, center + bobOffset, 3.3 * scale, 0, Math.PI * 2);
+    ctx2d.fill();
+    ctx2d.strokeStyle = "rgba(255, 252, 233, 0.82)";
+    ctx2d.lineWidth = 1.1 * scale;
+    ctx2d.beginPath();
+    ctx2d.arc(center - 2.1 * scale, center + bobOffset - 2.1 * scale, 5.2 * scale, -1.15, -0.1);
+    ctx2d.stroke();
+  } else {
+    const vBarX = center - 3 * scale;
+    const vBarY = center + bobOffset - 8 * scale;
+    const hBarX = center - 8 * scale;
+    const hBarY = center + bobOffset - 3 * scale;
+    if (typeof ctx2d.roundRect === "function") {
+      ctx2d.beginPath();
+      ctx2d.roundRect(vBarX, vBarY, 6 * scale, 16 * scale, 2 * scale);
+      ctx2d.fill();
+      ctx2d.beginPath();
+      ctx2d.roundRect(hBarX, hBarY, 16 * scale, 6 * scale, 2 * scale);
+      ctx2d.fill();
+    } else {
+      ctx2d.fillRect(vBarX, vBarY, 6 * scale, 16 * scale);
+      ctx2d.fillRect(hBarX, hBarY, 16 * scale, 6 * scale);
+    }
+  }
+  ctx2d.restore();
+}
+
+function stopHowtoPickupPreviewAnimation() {
+  if (howtoPickupPreviewFrame) {
+    cancelAnimationFrame(howtoPickupPreviewFrame);
+    howtoPickupPreviewFrame = 0;
+  }
+}
+
+function tickHowtoPickupPreview(nowMs) {
+  if (!howToPlayOverlay || howToPlayOverlay.classList.contains("hidden")) {
+    stopHowtoPickupPreviewAnimation();
+    return;
+  }
+  if (!howtoPickupPreviewStart) {
+    howtoPickupPreviewStart = nowMs;
+  }
+  const timeSec = (nowMs - howtoPickupPreviewStart) / 1000;
+  drawHowtoPickupPreview(howtoXpCanvas, "xp-orb", timeSec);
+  drawHowtoPickupPreview(howtoHealCanvas, "heal", timeSec + 0.45);
+  howtoPickupPreviewFrame = requestAnimationFrame(tickHowtoPickupPreview);
+}
+
+function startHowtoPickupPreviewAnimation() {
+  if ((!howtoXpCanvas && !howtoHealCanvas) || howtoPickupPreviewFrame) {
+    return;
+  }
+  howtoPickupPreviewStart = 0;
+  howtoPickupPreviewFrame = requestAnimationFrame(tickHowtoPickupPreview);
+}
+
 function hasSeenHowToPlay() {
   try {
     return window.localStorage?.getItem(HOW_TO_PLAY_STORAGE_KEY) === "true";
@@ -785,6 +1094,8 @@ function openHowToPlay(options = {}) {
   pressedActions.clear();
   resetTouchControls();
   howToPlayOverlay.classList.remove("hidden");
+  retriggerEnterAnimation(howToPlayOverlay, howToPlayPanel ?? howToPlayOverlay);
+  startHowtoPickupPreviewAnimation();
   howToPlayOverlay.classList.toggle("is-first-run", Boolean(options.firstRun));
   if (options.firstRun) {
     markHowToPlaySeen();
@@ -798,6 +1109,7 @@ function closeHowToPlay() {
   }
   state.pause.helpPanel = false;
   howToPlayOverlay.classList.add("hidden");
+  stopHowtoPickupPreviewAnimation();
   howToPlayOverlay.classList.remove("is-first-run");
   syncMusicPauseState();
 }
@@ -829,7 +1141,7 @@ function updateAudioMixerUI() {
   audioMixer.classList.toggle("is-master-muted", muted);
   audioMixerButton?.setAttribute("aria-pressed", muted ? "true" : "false");
   if (audioMixerButton) {
-    audioMixerButton.textContent = muted ? "\uD83D\uDD07" : "\uD83D\uDD0A";
+    audioMixerButton.innerHTML = `${muted ? "\uD83D\uDD07" : "\uD83D\uDD0A"}<span class="audio-mixer-label">Sound</span>`;
     audioMixerButton.title = muted ? "Sound off (M)" : "Sound on (M)";
   }
 
@@ -1056,6 +1368,8 @@ function buildClassHoverTooltipHtml(classId) {
   const enemyEmoji = ENEMY_ARCHETYPES[requirement.enemyType]?.emoji ?? "\u2620\uFE0F";
   const xpCurrent = isCurrentTarget ? Math.min(requirement.xp, metaProgress.unlockState.xp) : 0;
   const killCurrent = isCurrentTarget ? Math.min(requirement.enemyKills, metaProgress.unlockState.kills) : 0;
+  const xpDone = isCurrentTarget && xpCurrent >= requirement.xp;
+  const killsDone = isCurrentTarget && killCurrent >= requirement.enemyKills;
   const gateNote = isCurrentTarget
     ? ""
     : `<div class="class-hover-note">First unlock the previous mage in the chain.</div>`;
@@ -1063,8 +1377,8 @@ function buildClassHoverTooltipHtml(classId) {
     `<div class="class-hover-head">\uD83D\uDD12 Unlock ${classDef?.title ?? "Class"}</div>`,
     gateNote,
     `<div class="class-hover-steps">`,
-    `<div class="class-hover-step"><span class="class-hover-index">1</span><div class="class-hover-copy"><strong>Gain XP</strong><span>${xpCurrent} / ${requirement.xp}</span></div></div>`,
-    `<div class="class-hover-step"><span class="class-hover-index">2</span><div class="class-hover-copy"><strong><span class="class-hover-enemy">${enemyEmoji}</span> Defeat ${enemyLabel}</strong><span>${killCurrent} / ${requirement.enemyKills}</span></div></div>`,
+    `<div class="class-hover-step ${xpDone ? "is-complete" : ""}"><span class="class-hover-index">${xpDone ? "✓" : "1"}</span><div class="class-hover-copy"><strong>${xpDone ? "Complete: " : ""}Gain XP</strong><span>${xpCurrent} / ${requirement.xp}</span></div></div>`,
+    `<div class="class-hover-step ${killsDone ? "is-complete" : ""}"><span class="class-hover-index">${killsDone ? "✓" : "2"}</span><div class="class-hover-copy"><strong>${killsDone ? "Complete: " : ""}<span class="class-hover-enemy">${enemyEmoji}</span> Defeat ${enemyLabel}</strong><span>${killCurrent} / ${requirement.enemyKills}</span></div></div>`,
     `</div>`,
   ].join("");
 }
@@ -1144,7 +1458,7 @@ function bindEvents() {
 
       if (state.pause.upgradesPanel) {
         playShortcutUiClick();
-        closeUpgradesPanel();
+        openPauseMenu();
       } else if (isPauseActive()) {
         playShortcutUiClick();
         clearPause();
@@ -1160,7 +1474,11 @@ function bindEvents() {
     if (event.code === "Tab") {
       if (state.running && !state.levelUp.active && !state.bossReward.active) {
         playShortcutUiClick();
-        toggleUpgradesPanel();
+        if (state.pause.upgradesPanel) {
+          openPauseMenu();
+        } else {
+          openUpgradesPanel();
+        }
       }
       event.preventDefault();
       return;
@@ -1276,11 +1594,27 @@ function bindEvents() {
   });
 
   window.addEventListener("resize", resizeCanvas);
+  window.addEventListener("pointermove", onMageAmbientPointerMove, { passive: true });
   restartButton.addEventListener("click", restartRunWithArchiveOutro);
   pauseRestartButton.addEventListener("click", () => endRun({ instant: true, cause: "ended" }));
   upgradeOptions.addEventListener("click", onUpgradeOptionClick);
   bossRewardOptions.addEventListener("click", onBossRewardOptionClick);
   upgradesButton.addEventListener("click", toggleUpgradesPanel);
+  menuResumeButton?.addEventListener("click", clearPause);
+  menuUpgradesButton?.addEventListener("click", openUpgradesPanel);
+  menuHelpButton?.addEventListener("click", () => {
+    if (state.running && !state.levelUp.active && !state.bossReward.active) {
+      openHowToPlay();
+    }
+  });
+  menuEndRunButton?.addEventListener("click", () => {
+    if (!pauseMenuEndRunConfirm) {
+      requestPauseMenuEndRunConfirm();
+      return;
+    }
+    clearPauseMenuEndRunConfirm();
+    endRun({ instant: true, cause: "ended" });
+  });
   helpButton?.addEventListener("click", () => {
     if (state.running && !state.levelUp.active && !state.bossReward.active) {
       openHowToPlay();
@@ -1359,9 +1693,16 @@ function bindEvents() {
     if (!card) {
       continue;
     }
+    card.setAttribute("tabindex", "0");
+    card.addEventListener("pointerenter", () => showSkillTooltip(card));
+    card.addEventListener("pointermove", () => showSkillTooltip(card));
+    card.addEventListener("pointerleave", hideSkillTooltip);
+    card.addEventListener("pointercancel", hideSkillTooltip);
     card.addEventListener("mouseenter", () => showSkillTooltip(card));
     card.addEventListener("mousemove", () => showSkillTooltip(card));
     card.addEventListener("mouseleave", hideSkillTooltip);
+    card.addEventListener("focus", () => showSkillTooltip(card));
+    card.addEventListener("blur", hideSkillTooltip);
     if (card.dataset.skillSlot) {
       card.addEventListener("click", () => {
         if (!state.dev.manualSkillMode) {
@@ -1379,6 +1720,8 @@ function bindEvents() {
   window.addEventListener("pointermove", onTouchPointerMove, { passive: false });
   window.addEventListener("pointerup", onTouchPointerEnd);
   window.addEventListener("pointercancel", onTouchPointerEnd);
+  audioMixer?.classList.add("hidden");
+  startMageAmbientEffect();
   updateAudioMixerUI();
 }
 
@@ -1386,6 +1729,7 @@ function resizeCanvas() {
   viewWidth = Math.max(360, window.innerWidth);
   viewHeight = Math.max(240, window.innerHeight);
   applyRenderResolution(true);
+  resizeMageAmbientCanvas();
   updateTouchInterface();
 }
 
@@ -1412,9 +1756,15 @@ function getTargetRenderScale() {
   return clamp(Math.sqrt(adjustedBudget / viewportPixels), 0.7, 1);
 }
 
+function applyVisualPixelScale(targetScale) {
+  const factor = targetScale >= 0.9 ? 0.92 : 0.97;
+  return clamp(targetScale * factor, 0.66, 1);
+}
+
 function applyRenderResolution(force = false) {
-  const targetScale = Math.round(getTargetRenderScale() * 20) / 20;
-  const nextScale = clamp(targetScale, 0.7, 1);
+  const baseScale = Math.round(getTargetRenderScale() * 20) / 20;
+  const targetScale = applyVisualPixelScale(baseScale);
+  const nextScale = clamp(targetScale, 0.66, 1);
   const nextWidth = Math.max(1, Math.round(viewWidth * nextScale));
   const nextHeight = Math.max(1, Math.round(viewHeight * nextScale));
   if (!force && canvas.width === nextWidth && canvas.height === nextHeight && Math.abs(renderScale - nextScale) < 0.001) {
@@ -1427,7 +1777,7 @@ function applyRenderResolution(force = false) {
   canvas.width = nextWidth;
   canvas.height = nextHeight;
   ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
-  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingEnabled = false;
   invalidateBackgroundCache();
   refreshScreenGradients();
   return true;
@@ -1435,8 +1785,8 @@ function applyRenderResolution(force = false) {
 
 function refreshScreenGradients() {
   backgroundGradient = ctx.createLinearGradient(0, 0, 0, viewHeight);
-  backgroundGradient.addColorStop(0, "#102520");
-  backgroundGradient.addColorStop(1, "#1f392f");
+  backgroundGradient.addColorStop(0, "#1a2b4a");
+  backgroundGradient.addColorStop(1, "#2b3f66");
 
   screenVignetteGradient = ctx.createRadialGradient(
     viewWidth * 0.5,
@@ -1447,7 +1797,7 @@ function refreshScreenGradients() {
     Math.max(viewWidth, viewHeight) * 0.78
   );
   screenVignetteGradient.addColorStop(0, "rgba(0, 0, 0, 0)");
-  screenVignetteGradient.addColorStop(1, "rgba(2, 8, 7, 1)");
+  screenVignetteGradient.addColorStop(1, "rgba(3, 10, 28, 1)");
 
   hurtVignetteGradient = ctx.createRadialGradient(
     viewWidth * 0.5,
@@ -1458,12 +1808,12 @@ function refreshScreenGradients() {
     Math.max(viewWidth, viewHeight) * 0.72
   );
   hurtVignetteGradient.addColorStop(0, "rgba(0, 0, 0, 0)");
-  hurtVignetteGradient.addColorStop(0.72, "rgba(120, 20, 22, 0.58)");
-  hurtVignetteGradient.addColorStop(1, "rgba(196, 22, 28, 1)");
+  hurtVignetteGradient.addColorStop(0.72, "rgba(138, 34, 32, 0.54)");
+  hurtVignetteGradient.addColorStop(1, "rgba(186, 44, 38, 1)");
 
   deathWashGradient = ctx.createLinearGradient(0, 0, 0, viewHeight);
-  deathWashGradient.addColorStop(0, "rgba(255, 124, 124, 1)");
-  deathWashGradient.addColorStop(1, "rgba(118, 18, 24, 1)");
+  deathWashGradient.addColorStop(0, "rgba(244, 132, 114, 1)");
+  deathWashGradient.addColorStop(1, "rgba(122, 32, 34, 1)");
 }
 
 function invalidateBackgroundCache() {
@@ -6765,12 +7115,11 @@ function renderArchiveProgressCard() {
 
   archiveProgressCard.innerHTML = [
     `<div class="archive-progress-head">`,
-    `<div><span class="archive-progress-kicker">Archive Progress</span><strong>${completedChallenges} / ${ARCHIVE_CHALLENGES.length} Trials</strong></div>`,
-    `<div class="archive-progress-badge">${percent}%</div>`,
+    `<div><span class="archive-progress-chip archive-progress-chip-primary">Achievements ${completedAchievements} / ${ARCHIVE_ACHIEVEMENTS.length}</span><strong>${completedChallenges} / ${ARCHIVE_CHALLENGES.length} Trials</strong></div>`,
     `</div>`,
-    `<div class="archive-progress-chips">`,
-    `<span class="archive-progress-chip">Achievements ${completedAchievements} / ${ARCHIVE_ACHIEVEMENTS.length}</span>`,
-    `<span class="archive-progress-chip">Completion ${percent}%</span>`,
+    `<div class="archive-progress-meter" role="progressbar" aria-label="Archive progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">`,
+    `<div class="archive-progress-meter-fill" style="width:${percent}%"></div>`,
+    `<span class="archive-progress-meter-label">${percent}%</span>`,
     `</div>`,
     pinned
       ? `<div class="archive-progress-list">${pinned}</div>`
@@ -7189,7 +7538,9 @@ function clearPause() {
   state.pause.helpPanel = false;
   state.pause.devMenu = false;
   state.pause.codexTab = "build";
+  clearPauseMenuEndRunConfirm();
   howToPlayOverlay?.classList.add("hidden");
+  stopHowtoPickupPreviewAnimation();
   refreshPauseOverlay();
   syncMusicPauseState();
 }
@@ -7197,7 +7548,19 @@ function clearPause() {
 function refreshPauseOverlay() {
   const wasHidden = pauseOverlay.classList.contains("hidden");
   const visible = state.running && !state.levelUp.active && !state.bossReward.active && (state.pause.manual || state.pause.focus || state.pause.upgradesPanel || state.pause.devMenu);
+  const menuMode = !state.pause.devMenu && !state.pause.upgradesPanel;
+  if (!menuMode || !visible) {
+    clearPauseMenuEndRunConfirm();
+  }
+  if (audioMixer) {
+    audioMixer.classList.toggle("hidden", !(visible && menuMode));
+    if (!visible || !menuMode) {
+      audioMixer.classList.remove("is-open");
+    }
+  }
   pauseOverlay.classList.toggle("hidden", !visible);
+  pauseOverlay.classList.toggle("is-menu-mode", visible && menuMode);
+  pauseOverlay.classList.toggle("is-upgrades-mode", visible && state.pause.upgradesPanel && !state.pause.devMenu);
   syncMusicPauseState();
   if (!visible) {
     return;
@@ -7209,8 +7572,8 @@ function refreshPauseOverlay() {
   }
 
   renderDevToolsPanel();
-  renderPauseMeta();
-  if (!state.pause.devMenu) {
+  if (!state.pause.devMenu && state.pause.upgradesPanel) {
+    renderPauseMeta();
     for (const button of codexTabButtons) {
       const active = button.dataset.codexTab === state.pause.codexTab;
       button.classList.toggle("is-active", active);
@@ -7218,10 +7581,15 @@ function refreshPauseOverlay() {
     }
     codexTabNav?.classList.remove("hidden");
   }
-  if (!state.pause.devMenu || state.dev.activeTab === "skills") {
+  if (!state.pause.devMenu && state.pause.upgradesPanel) {
     renderUpgradesCodex();
   }
-  upgradesList.classList.toggle("hidden", state.pause.devMenu && state.dev.activeTab !== "skills");
+  if (pauseMenuScreen) {
+    pauseMenuScreen.classList.toggle("hidden", !menuMode || state.pause.devMenu);
+  }
+  pauseMeta?.classList.toggle("hidden", menuMode && !state.pause.devMenu);
+  codexTabNav?.classList.toggle("hidden", menuMode || state.pause.devMenu);
+  upgradesList.classList.toggle("hidden", menuMode || (state.pause.devMenu && state.dev.activeTab !== "skills"));
   if (state.pause.devMenu) {
     codexTabNav?.classList.add("hidden");
     menuKicker.classList.add("hidden");
@@ -7231,11 +7599,17 @@ function refreshPauseOverlay() {
   }
 
   menuKicker.classList.remove("hidden");
-  menuKicker.textContent = state.pause.upgradesPanel ? "Codex" : "Paused";
-  pauseTitle.textContent = state.pause.upgradesPanel ? "Upgrade Codex" : "Paused";
-  pauseSubtitle.textContent = state.pause.focus
-    ? "Focus left the game, so the run is paused. Review your build and press Esc or Resume when you are ready."
-    : "Review your build while the run is paused. Press Esc or Resume to continue.";
+  if (menuMode) {
+    menuKicker.textContent = "Menu";
+    pauseTitle.textContent = "Paused";
+    pauseSubtitle.textContent = state.pause.focus
+      ? "Game is paused because focus changed. Resume when ready."
+      : "Choose your next action.";
+    return;
+  }
+  menuKicker.textContent = "Codex";
+  pauseTitle.textContent = "Arcane Upgrades";
+  pauseSubtitle.textContent = "Tune your build, review synergies, and return stronger.";
 }
 
 function toggleUpgradesPanel() {
@@ -7244,14 +7618,32 @@ function toggleUpgradesPanel() {
   }
 
   if (state.pause.upgradesPanel) {
-    closeUpgradesPanel();
+    openPauseMenu();
     return;
   }
 
+  openUpgradesPanel();
+}
+
+function openUpgradesPanel() {
+  if (!state.running || state.levelUp.active || state.bossReward.active) {
+    return;
+  }
   state.pause.devMenu = false;
   state.pause.upgradesPanel = true;
   state.pause.manual = true;
   state.pause.codexTab = "build";
+  pressedActions.clear();
+  refreshPauseOverlay();
+}
+
+function openPauseMenu() {
+  if (!state.running || state.levelUp.active || state.bossReward.active) {
+    return;
+  }
+  state.pause.devMenu = false;
+  state.pause.upgradesPanel = false;
+  state.pause.manual = true;
   pressedActions.clear();
   refreshPauseOverlay();
 }
@@ -7450,7 +7842,7 @@ function getUnlockInstructionText(classId) {
 function getClassThemePalette(classId) {
   switch (classId) {
     case "wind":
-      return { a: "rgba(154, 224, 255, 0.42)", b: "rgba(116, 192, 255, 0.32)", c: "rgba(176, 245, 255, 0.2)" };
+      return { a: "rgba(194, 239, 255, 0.56)", b: "rgba(156, 220, 255, 0.44)", c: "rgba(213, 248, 255, 0.3)" };
     case "frost":
       return { a: "rgba(119, 176, 255, 0.44)", b: "rgba(78, 132, 240, 0.34)", c: "rgba(146, 207, 255, 0.22)" };
     case "fire":
@@ -7504,6 +7896,7 @@ function renderStartOverlay() {
   const focusedClassDef = CLASS_DEFS[focusedClassId];
   const focusedUnlocked = Boolean(metaProgress.unlocked[focusedClassId]);
   const focusTheme = getClassThemePalette(focusedClassId);
+  setMageAmbientClassTheme(focusedClassId);
   if (startSubtitle) {
     startSubtitle.textContent = START_OVERLAY_SHORT_DESCRIPTION;
   }
@@ -7512,10 +7905,14 @@ function renderStartOverlay() {
     startMagePanel.style.setProperty("--class-b", focusTheme.b);
     startMagePanel.style.setProperty("--class-c", focusTheme.c);
   }
+  resizeMageAmbientCanvas();
 
   if (classPreviewHero) {
     classPreviewHero.textContent = focusedClassDef?.playerEmoji ?? "\uD83E\uDDD9\uFE0F";
     classPreviewHero.classList.toggle("is-locked", !focusedUnlocked);
+  }
+  if (classPreviewTitle) {
+    classPreviewTitle.textContent = focusedClassDef?.title ?? "Mage";
   }
 
   if (classPreviewSkills) {
@@ -7523,7 +7920,6 @@ function renderStartOverlay() {
       `<div class="mage-skill-row">`,
       `<div class="mage-skill-icon">${skill.icon}</div>`,
       `<div class="mage-skill-copy"><strong>${skill.title}</strong><span>${getSkillPreviewCopy(focusedClassId, skill.id)}</span></div>`,
-      `<div class="mage-skill-slot">S${skill.slot}</div>`,
       `</div>`,
     ].join("")).join("");
   }
@@ -7557,46 +7953,23 @@ function renderStartOverlay() {
     button.style.setProperty("--class-b", classTheme.b);
     button.style.setProperty("--class-c", classTheme.c);
     button.innerHTML = [
-      `<div class="class-thumb-icon-bg"><span class="class-thumb-icon">${classDef.playerEmoji}</span></div>`,
-      `<div class="class-thumb-title">${classDef.title}</div>`,
+      `<span class="class-thumb-icon">${classDef.playerEmoji}</span>`,
+      unlocked ? `<div class="class-thumb-title">${classDef.title}</div>` : "",
       lockChipMarkup,
     ].join("");
     classThumbStrip.appendChild(button);
   }
 
-  if (!targetClassId) {
-    classProgressCard.innerHTML = [
-      `<div class="class-progress-head class-progress-head-complete">`,
-      `<div><span class="class-progress-kicker">Archive Status</span><span class="class-progress-title">All mages unlocked</span></div>`,
-      `<strong>\u2714</strong>`,
-      `</div>`,
-      `<div class="class-progress-meta">`,
-      `<span class="class-progress-chip">Every class is ready for play.</span>`,
-      `<span class="class-progress-chip">Pick any mage and start a run.</span>`,
-      `</div>`,
-    ].join("");
-  } else {
-    const requirement = CLASS_UNLOCK_REQUIREMENTS[targetClassId];
-    const enemyProfile = requirement.enemyType ? ENEMY_ARCHETYPES[requirement.enemyType] : null;
-    const enemyEmoji = enemyProfile?.emoji ?? "\u2620\uFE0F";
-    const enemyLabel = formatEnemyTypeLabel(requirement.enemyType);
-    classProgressCard.innerHTML = [
-      `<div class="class-progress-head">`,
-      `<div><span class="class-progress-kicker">Next Unlock</span><span class="class-progress-title">${CLASS_DEFS[targetClassId].title}</span></div>`,
-      `<strong>${CLASS_DEFS[targetClassId].icon}</strong>`,
-      `</div>`,
-      `<div class="class-progress-meta">`,
-      `<span class="class-progress-chip">Gain XP: ${Math.min(metaProgress.unlockState.xp, requirement.xp)} / ${requirement.xp}</span>`,
-      `<span class="class-progress-chip">${enemyEmoji} Defeat ${enemyLabel}: ${Math.min(metaProgress.unlockState.kills, requirement.enemyKills)} / ${requirement.enemyKills}</span>`,
-      `</div>`,
-    ].join("");
+  if (classProgressCard) {
+    classProgressCard.innerHTML = "";
+    classProgressCard.classList.add("hidden");
   }
 
   renderArchiveProgressCard();
   const selectedClassDef = CLASS_DEFS[metaProgress.selectedClassId];
   startRunButton.textContent = focusedUnlocked
-    ? `${focusedClassDef.playerEmoji} Start ${focusedClassDef.title}`
-    : `${selectedClassDef.playerEmoji} Start ${selectedClassDef.title}`;
+    ? `${focusedClassDef.playerEmoji} Start as ${focusedClassDef.title}`
+    : `${selectedClassDef.playerEmoji} Start as ${selectedClassDef.title}`;
   updateAudioMixerUI();
   startOverlay.classList.toggle("hidden", state.running);
 }

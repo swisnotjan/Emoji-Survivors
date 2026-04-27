@@ -517,7 +517,7 @@
       skills: [
         { id: "cinder-halo", title: "Cinder Halo", icon: "\u2604\uFE0F", slot: 1, cooldown: 7.5, role: "Panic", targeting: "self" },
         { id: "sunspot", title: "Sunspot", icon: "\uD83C\uDF1E", slot: 2, cooldown: 11.2, role: "Zone", targeting: "cluster" },
-        { id: "ash-comet", title: "Ash Comet", icon: "\u2604", slot: 3, cooldown: 14.6, role: "Signature", targeting: "cluster" },
+        { id: "ash-comet", title: "Ash Comet", icon: "\uD83C\uDF0B", slot: 3, cooldown: 14.6, role: "Signature", targeting: "cluster" },
       ],
     },
     necro: {
