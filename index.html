@@ -16,6 +16,7 @@
       <div id="audioMixer" class="audio-mixer" aria-label="Audio controls">
         <button id="audioMixerButton" class="audio-mixer-button" type="button" aria-label="Open audio controls" data-no-ui-click="true">
           🔊
+          <span class="audio-mixer-label">Sound</span>
         </button>
         <div id="audioMixerPanel" class="audio-mixer-panel" role="group" aria-label="Audio mixer">
           <div class="audio-mixer-row">
@@ -47,33 +48,44 @@
             <section class="start-panel start-mage-panel" aria-label="Mage selection">
               <div class="start-panel-head">
                 <p class="start-panel-kicker">Choose Your Mage</p>
-                <span class="start-panel-orbit" aria-hidden="true">&#x2726;</span>
               </div>
+              <canvas id="mageAmbientCanvas" class="mage-ambient-canvas" aria-hidden="true"></canvas>
               <div class="mage-selector">
-                <button id="classPreviewPrev" class="mage-switch-button" type="button" aria-label="Previous mage">&#x2039;</button>
                 <div class="mage-preview-core">
+                  <h3 id="classPreviewTitle" class="mage-preview-title">Mage</h3>
                   <div class="mage-preview-hero-wrap">
                     <div id="classPreviewHero" class="mage-preview-hero" aria-live="polite">&#x1F9D9;&#xFE0F;</div>
                   </div>
                   <div id="classPreviewSkills" class="mage-preview-skills"></div>
                 </div>
-                <button id="classPreviewNext" class="mage-switch-button" type="button" aria-label="Next mage">&#x203A;</button>
               </div>
               <div id="classThumbStrip" class="class-thumb-strip"></div>
               <div id="classSelectGrid" class="class-select-grid hidden">
               </div>
-              <div id="classProgressCard" class="class-progress-card"></div>
+              <div id="classProgressCard" class="class-progress-card hidden"></div>
             </section>
             <section class="start-panel start-achievements-panel" aria-label="Achievements">
               <div class="start-panel-head">
-                <p class="start-panel-kicker">Achievements</p>
-                <span class="start-panel-orbit" aria-hidden="true">&#x25C8;</span>
+                <p class="start-panel-kicker">Archive Progress</p>
               </div>
               <div id="archiveProgressCard" class="archive-progress-card"></div>
             </section>
           </div>
           <div class="start-actions">
             <button id="startRunButton" type="button">Start Run</button>
+          </div>
+        </div>
+      </div>
+      <div id="mobileBlockOverlay" class="overlay start-overlay mobile-block-overlay hidden" aria-live="polite">
+        <div class="overlay-card mobile-block-card">
+          <div class="start-header">
+            <div class="start-logo">
+              <img class="start-logo-image" src="assets/start-logo.png" alt="Emoji Survivors" />
+            </div>
+          </div>
+          <div class="mobile-block-copy">
+            <h1 class="mobile-block-title">Mobile Magic Is Brewing</h1>
+            <p class="mobile-block-text">Everyone is hyped for the phone-and-tablet version. It is coming soon, but for now please jump in on PC and blast some monsters. It is way more fun with a keyboard.</p>
           </div>
         </div>
       </div>
@@ -99,25 +111,29 @@
       </div>
 
       <button id="helpButton" class="help-button hud-corner-button" type="button" aria-label="How to play">
-        <span class="hud-corner-icon">?</span>
+        <span class="hud-corner-icon help-icon">&#x1F4DC;</span>
+        <span class="help-button-label">How to Play</span>
         <span class="button-hotkey">H</span>
       </button>
       <button id="upgradesButton" class="upgrades-button hud-corner-button" type="button">
-        <span class="upgrades-button-label">&#x1F4DC; Upgrades</span>
+        <span class="upgrades-button-label">&#x1F9EC; Upgrades</span>
         <span class="button-hotkey">Tab</span>
       </button>
 
+      <canvas id="miniMapCanvas" class="mini-map-canvas" width="196" height="196" aria-label="Minimap"></canvas>
+      <div id="miniMapObjectives" class="mini-map-objectives" aria-live="polite"></div>
+
       <div class="status-cluster">
         <div class="status-top">
-          <div class="status-side">
-            <div class="level-chip">
-              <span class="label">Level</span>
-              <strong id="levelValue">1</strong>
-            </div>
+            <div class="status-side">
+              <div class="level-chip">
+                <span class="label">Level</span>
+                <strong id="levelValue">1</strong>
+              </div>
             <div id="dashHud" class="dash-hud">
               <div class="dash-head">
                 <span class="label">Dash</span>
-                <span class="dash-hotkey">Space / Shift</span>
+                <span class="dash-hotkey">Space</span>
               </div>
               <div id="dashCharges" class="dash-charges">
                 <div class="dash-charge"><div class="dash-charge-fill"></div></div>
@@ -132,7 +148,7 @@
             <div class="status-bars">
               <div class="bar-group">
                 <div class="bar-head">
-                  <span>HP</span>
+                  <span class="bar-label bar-label-hp">♥</span>
                   <strong id="hpValue"><span id="hpCurrent">100</span><span class="value-slash">/</span><span id="hpMax">100</span></strong>
                 </div>
                 <div class="bar-track hp-track">
@@ -142,7 +158,7 @@
               </div>
               <div class="bar-group">
                 <div class="bar-head">
-                  <span>XP</span>
+                  <span class="bar-label bar-label-xp">✦</span>
                   <strong id="xpValue"><span id="xpCurrent">0</span><span class="value-slash">/</span><span id="xpMax">0</span></strong>
                 </div>
                 <div class="bar-track xp-track">
@@ -159,17 +175,20 @@
               </div>
               <div class="skill-card skill-card-active locked" data-skill-slot="1">
                 <div class="skill-card-fill"><div class="skill-fill"></div></div>
-                <span class="skill-cd">Lv 5</span>
+                <span class="skill-lock-badge">&#x1F512;</span>
+                <span class="skill-cd"></span>
                 <span class="skill-icon">&#x2726;</span>
               </div>
               <div class="skill-card skill-card-active locked" data-skill-slot="2">
                 <div class="skill-card-fill"><div class="skill-fill"></div></div>
-                <span class="skill-cd">Lv 15</span>
+                <span class="skill-lock-badge">&#x1F512;</span>
+                <span class="skill-cd"></span>
                 <span class="skill-icon">&#x2726;</span>
               </div>
               <div class="skill-card skill-card-active locked" data-skill-slot="3">
                 <div class="skill-card-fill"><div class="skill-fill"></div></div>
-                <span class="skill-cd">Lv 25</span>
+                <span class="skill-lock-badge">&#x1F512;</span>
+                <span class="skill-cd"></span>
                 <span class="skill-icon">&#x2726;</span>
               </div>
             </div>
@@ -234,37 +253,35 @@
             <button id="closeHowToButton" class="pause-button pause-button-accent" type="button">Got it</button>
           </div>
           <div class="howto-grid">
-            <div class="howto-control">
-              <div class="key-cluster key-cluster-wasd" aria-hidden="true">
-                <span></span>
-                <kbd>W</kbd>
-                <span></span>
-                <kbd>A</kbd>
-                <kbd>S</kbd>
-                <kbd>D</kbd>
+            <div class="howto-control howto-control-wide">
+              <div class="howto-input-pair" aria-hidden="true">
+                <div class="key-cluster key-cluster-wasd">
+                  <span></span>
+                  <kbd>W</kbd>
+                  <span></span>
+                  <kbd>A</kbd>
+                  <kbd>S</kbd>
+                  <kbd>D</kbd>
+                </div>
+                <span class="howto-slash">/</span>
+                <div class="key-cluster key-cluster-arrows">
+                  <span></span>
+                  <kbd>&uarr;</kbd>
+                  <span></span>
+                  <kbd>&larr;</kbd>
+                  <kbd>&darr;</kbd>
+                  <kbd>&rarr;</kbd>
+                </div>
               </div>
               <div>
                 <strong>Move</strong>
-                <span>Dodge enemies and steer toward XP.</span>
-              </div>
-            </div>
-            <div class="howto-control">
-              <div class="key-cluster key-cluster-arrows" aria-hidden="true">
-                <span></span>
-                <kbd>&uarr;</kbd>
-                <span></span>
-                <kbd>&larr;</kbd>
-                <kbd>&darr;</kbd>
-                <kbd>&rarr;</kbd>
-              </div>
-              <div>
-                <strong>Move</strong>
-                <span>Arrow keys work too.</span>
+                <span>Use WASD / arrows to dodge pressure and path toward pickups.</span>
               </div>
             </div>
             <div class="howto-control howto-control-wide">
-              <div class="key-row" aria-hidden="true">
+              <div class="key-row key-row-inline" aria-hidden="true">
                 <kbd class="key-wide">Space</kbd>
+                <span class="howto-slash">/</span>
                 <kbd class="key-wide">Shift</kbd>
               </div>
               <div>
@@ -273,6 +290,20 @@
               </div>
             </div>
             <div class="howto-control">
+              <canvas id="howtoXpCanvas" class="howto-pickup-canvas" width="84" height="84" aria-hidden="true"></canvas>
+              <div>
+                <strong>Experience</strong>
+                <span>Collect yellow XP orbs to level up and pick new upgrades.</span>
+              </div>
+            </div>
+            <div class="howto-control">
+              <canvas id="howtoHealCanvas" class="howto-pickup-canvas" width="84" height="84" aria-hidden="true"></canvas>
+              <div>
+                <strong>Healing</strong>
+                <span>Grab green heals to restore HP and stay alive in long fights.</span>
+              </div>
+            </div>
+            <div class="howto-control howto-control-key">
               <div class="key-row" aria-hidden="true">
                 <kbd>Tab</kbd>
               </div>
@@ -281,7 +312,7 @@
                 <span>Open your codex and check the current build.</span>
               </div>
             </div>
-            <div class="howto-control">
+            <div class="howto-control howto-control-key">
               <div class="key-row" aria-hidden="true">
                 <kbd>H</kbd>
               </div>
@@ -297,6 +328,15 @@
 
       <div id="pauseOverlay" class="overlay hidden pause-overlay upgrades-overlay">
         <div class="upgrades-panel pause-panel">
+          <div id="pauseMenuScreen" class="pause-menu-screen hidden">
+            <img class="pause-menu-logo" src="assets/start-logo.png" alt="Emoji Survivors" />
+            <div class="pause-menu-actions">
+              <button id="menuResumeButton" class="pause-button pause-button-accent" type="button">Resume</button>
+              <button id="menuUpgradesButton" class="pause-button pause-button-accent" type="button">Upgrades</button>
+              <button id="menuHelpButton" class="pause-button pause-button-accent" type="button">How to Play</button>
+              <button id="menuEndRunButton" class="pause-button pause-button-danger" type="button">End Run</button>
+            </div>
+          </div>
           <div class="upgrades-head">
             <div>
               <p class="menu-kicker">Paused</p>
