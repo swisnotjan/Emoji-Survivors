@@ -2552,11 +2552,29 @@ function drawPlayer() {
   const deathProgress = runEnd.active ? clamp(runEnd.timer / runEnd.duration, 0, 1) : 0;
   const deathTilt = deathProgress * 1.56;
 
+  if (perfTier <= 1) {
+    ctx.save();
+    const aura = ctx.createRadialGradient(center.x + jitterX, center.y + jitterY, 1, center.x + jitterX, center.y + jitterY, 28);
+    aura.addColorStop(0, tintAlpha(classDef.color, 0.08 + pulse * 0.04));
+    aura.addColorStop(0.38, tintAlpha(classDef.color, 0.06));
+    aura.addColorStop(1, "rgba(19, 40, 33, 0)");
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(center.x + jitterX, center.y + jitterY, 28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.save();
+  // Hard reset of draw state so the player never inherits transparency/composite from prior passes.
   ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.filter = "none";
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = "transparent";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = PLAYER_FONT;
-  ctx.save();
   ctx.translate(center.x + jitterX, center.y + 1 + jitterY);
   if (runEnd.active) {
     ctx.rotate(deathTilt);
@@ -2572,19 +2590,6 @@ function drawPlayer() {
     shadowColor: "rgba(255, 223, 138, 0.35)",
   })) {
     ctx.fillText(state.player.emoji, 0, 0);
-  }
-  if (perfTier <= 1) {
-    const aura = ctx.createRadialGradient(0, 0, 1, 0, 0, 28);
-    aura.addColorStop(0, tintAlpha(classDef.color, 0.08 + pulse * 0.04));
-    aura.addColorStop(0.38, tintAlpha(classDef.color, 0.06));
-    aura.addColorStop(1, "rgba(19, 40, 33, 0)");
-    ctx.save();
-    ctx.globalCompositeOperation = "destination-over";
-    ctx.fillStyle = aura;
-    ctx.beginPath();
-    ctx.arc(0, 0, 28, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
   }
   ctx.restore();
   ctx.shadowBlur = 0;

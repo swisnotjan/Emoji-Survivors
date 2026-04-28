@@ -2114,9 +2114,16 @@ function gameLoop(nowMs) {
   beginProfilerFrame(frameTime);
   accumulator += frameTime;
 
-  while (accumulator >= FIXED_STEP) {
+  const maxSubSteps = 6;
+  let subSteps = 0;
+  while (accumulator >= FIXED_STEP && subSteps < maxSubSteps) {
     update(FIXED_STEP);
     accumulator -= FIXED_STEP;
+    subSteps += 1;
+  }
+  if (subSteps >= maxSubSteps && accumulator >= FIXED_STEP) {
+    // Drop stale simulation debt to prevent a long-running catch-up loop.
+    accumulator = Math.min(accumulator, FIXED_STEP * 0.5);
   }
 
   const renderStart = profilerNow();
@@ -6927,6 +6934,32 @@ function updateEffects(dt) {
     state.cameraShake.offsetY = 0;
   }
 
+  const perfTier = getPerformanceTier();
+  const zoneTickTargetBudget = perfTier >= 3 ? 12 : perfTier >= 2 ? 20 : perfTier >= 1 ? 32 : 54;
+  const zoneTickScanBudget = zoneTickTargetBudget * 4;
+  function inZoneRadius(enemy, x, y, radius) {
+    const dx = enemy.x - x;
+    const dy = enemy.y - y;
+    const maxRadius = radius + enemy.radius;
+    return dx * dx + dy * dy <= maxRadius * maxRadius;
+  }
+  function runCappedZonePass(originX, originY, scanRadius, handler) {
+    let scans = 0;
+    let applied = 0;
+    visitEnemiesInRange(originX, originY, scanRadius, (enemy) => {
+      if (applied >= zoneTickTargetBudget || scans >= zoneTickScanBudget) {
+        return;
+      }
+      scans += 1;
+      if (enemy.dead) {
+        return;
+      }
+      if (handler(enemy) === true) {
+        applied += 1;
+      }
+    });
+  }
+
   for (const effect of state.effects) {
     effect.life -= dt;
     if (effect.life <= 0) {
@@ -6985,15 +7018,13 @@ function updateEffects(dt) {
       }
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
-        visitEnemiesInRange(effect.x, effect.y, effect.radius + 48, (enemy) => {
-          if (enemy.dead) {
-            return;
+        runCappedZonePass(effect.x, effect.y, effect.radius + 48, (enemy) => {
+          if (!inZoneRadius(enemy, effect.x, effect.y, effect.radius)) {
+            return false;
           }
           const distance = Math.hypot(enemy.x - effect.x, enemy.y - effect.y);
-          if (distance > effect.radius + enemy.radius) {
-            return;
-          }
           applyZoneTick(effect, enemy, 1 - Math.min(0.55, distance / Math.max(1, effect.radius) * 0.35));
+          return true;
         });
       }
       continue;
@@ -7004,12 +7035,9 @@ function updateEffects(dt) {
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
         const { currentLength, currentWidth, centerX, centerY } = getCrosswindMetrics(effect, clamp(effect.life / effect.maxLife, 0, 1));
-        visitEnemiesInRange(centerX, centerY, Math.max(currentLength, currentWidth) * 0.6 + 48, (enemy) => {
-          if (enemy.dead) {
-            return;
-          }
+        runCappedZonePass(centerX, centerY, Math.max(currentLength, currentWidth) * 0.6 + 48, (enemy) => {
           if (!pointInRotatedRect(enemy.x, enemy.y, centerX, centerY, effect.angle, currentLength * 0.5, currentWidth * 0.5 + enemy.radius)) {
-            return;
+            return false;
           }
           applyZoneTick(effect, enemy, 1);
           const sidewaysX = -Math.sin(effect.angle);
@@ -7017,6 +7045,7 @@ function updateEffects(dt) {
           const side = Math.sign((enemy.x - effect.x) * sidewaysX + (enemy.y - effect.y) * sidewaysY) || 1;
           enemy.knockbackVX += sidewaysX * side * 260;
           enemy.knockbackVY += sidewaysY * side * 260;
+          return true;
         });
       }
       continue;
@@ -7026,20 +7055,20 @@ function updateEffects(dt) {
       effect.tickTimer -= dt;
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
-        visitEnemiesInRange(effect.x, effect.y, effect.radius + 48, (enemy) => {
-          if (enemy.dead) {
-            return;
-          }
+        runCappedZonePass(effect.x, effect.y, effect.radius + 48, (enemy) => {
           const dx = effect.x - enemy.x;
           const dy = effect.y - enemy.y;
-          const distance = Math.hypot(dx, dy);
-          if (distance > effect.radius + enemy.radius) {
-            return;
+          const maxRadius = effect.radius + enemy.radius;
+          const distanceSq = dx * dx + dy * dy;
+          if (distanceSq > maxRadius * maxRadius) {
+            return false;
           }
+          const distance = Math.sqrt(distanceSq);
           applyZoneTick(effect, enemy, 1);
           const pull = 120 + (1 - distance / Math.max(1, effect.radius)) * 220;
           enemy.knockbackVX += (dx / Math.max(1, distance)) * pull;
           enemy.knockbackVY += (dy / Math.max(1, distance)) * pull;
+          return true;
         });
       }
       continue;
@@ -7049,13 +7078,9 @@ function updateEffects(dt) {
       effect.armTime -= dt;
       if (!effect.burstDone && effect.armTime <= 0) {
         effect.burstDone = true;
-        visitEnemiesInRange(effect.x, effect.y, effect.radius + 48, (enemy) => {
-          if (enemy.dead) {
-            return;
-          }
-          const distance = Math.hypot(enemy.x - effect.x, enemy.y - effect.y);
-          if (distance > effect.radius + enemy.radius) {
-            return;
+        runCappedZonePass(effect.x, effect.y, effect.radius + 48, (enemy) => {
+          if (!inZoneRadius(enemy, effect.x, effect.y, effect.radius)) {
+            return false;
           }
           applyZoneTick(effect, enemy, 1);
           if (effect.kind === "permafrost-seal") {
@@ -7063,6 +7088,7 @@ function updateEffects(dt) {
           } else {
             applyEnemyBurn(enemy, enemy.isBoss ? 5 : 7, 4.2);
           }
+          return true;
         });
         if (effect.kind === "ash-comet") {
           pushEffect({
@@ -7087,15 +7113,12 @@ function updateEffects(dt) {
       effect.tickTimer -= dt;
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
-        visitEnemiesInRange(effect.x, effect.y, effect.radius + 48, (enemy) => {
-          if (enemy.dead) {
-            return;
-          }
-          const distance = Math.hypot(enemy.x - effect.x, enemy.y - effect.y);
-          if (distance > effect.radius + enemy.radius) {
-            return;
+        runCappedZonePass(effect.x, effect.y, effect.radius + 48, (enemy) => {
+          if (!inZoneRadius(enemy, effect.x, effect.y, effect.radius)) {
+            return false;
           }
           applyZoneTick(effect, enemy, 1);
+          return true;
         });
       }
       continue;
@@ -7106,14 +7129,20 @@ function updateEffects(dt) {
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
         const progress = 1 - effect.life / effect.maxLife;
+        const orbTargetBudget = Math.max(8, Math.floor(zoneTickTargetBudget * 0.7));
         for (let orb = 0; orb < effect.orbitCount; orb += 1) {
+          let orbHits = 0;
           const angle = progress * 24.6 + (orb / effect.orbitCount) * Math.PI * 2;
           const orbX = effect.x + Math.cos(angle) * effect.radius;
           const orbY = effect.y + Math.sin(angle) * effect.radius;
           visitEnemiesInRange(orbX, orbY, 36, (enemy) => {
+            if (orbHits >= orbTargetBudget) {
+              return;
+            }
             if (enemy.dead || !circlesOverlap(orbX, orbY, 18, enemy.x, enemy.y, enemy.radius)) {
               return;
             }
+            orbHits += 1;
             applyZoneTick(effect, enemy, 1);
             applyEnemyNecroMark(enemy);
           });
@@ -7125,14 +7154,13 @@ function updateEffects(dt) {
     if (effect.kind === "holy-wave") {
       const progress = 1 - effect.life / effect.maxLife;
       const radius = effect.size + progress * effect.growth;
-      visitEnemiesInRange(effect.x, effect.y, radius + effect.thickness + 36, (enemy) => {
-        if (enemy.dead || effect.hitIds.has(enemy.id)) {
-          return;
+      runCappedZonePass(effect.x, effect.y, radius + effect.thickness + 36, (enemy) => {
+        if (effect.hitIds.has(enemy.id)) {
+          return false;
         }
-
         const distance = Math.hypot(enemy.x - effect.x, enemy.y - effect.y);
         if (Math.abs(distance - radius) > enemy.radius + effect.thickness) {
-          return;
+          return false;
         }
 
         effect.hitIds.add(enemy.id);
@@ -7143,6 +7171,7 @@ function updateEffects(dt) {
         enemy.slowTimer = Math.max(enemy.slowTimer, 0.32);
         spawnHitEffect(enemy.x, enemy.y, "holy", enemy.x - effect.x, enemy.y - effect.y);
         dealDamageToEnemy(enemy, damage, "holy-wave");
+        return true;
       });
       continue;
     }
