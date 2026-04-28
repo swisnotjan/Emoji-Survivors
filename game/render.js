@@ -2437,9 +2437,9 @@ function drawEnemies() {
       ctx.fill();
 
       ctx.save();
-      const hueRotate = status.key === "wind" ? 0 : status.hue;
       if (perfTier === 0) {
-        ctx.filter = `saturate(1.18) hue-rotate(${hueRotate}deg) brightness(${1.04 + auraStrength * 0.08})`;
+        // Keep enemy sprites fully opaque; filter-based tinting on emoji atlas can look translucent.
+        ctx.filter = "none";
         ctx.shadowBlur = 18;
         ctx.shadowColor = tintAlpha(status.aura, 0.2 + auraStrength * 0.35);
       }

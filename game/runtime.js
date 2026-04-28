@@ -6440,22 +6440,80 @@ function computePlayerProjectileDamage(enemy, projectile) {
     damage *= state.player.frozenDamageMultiplier;
   }
   if (state.player.classId === "fire") {
-    let burningNearby = 0;
-    visitEnemiesInRange(enemy.x, enemy.y, 220, (e) => {
-      if (!e.dead && e.id !== enemy.id && e.burnStacks > 0) burningNearby += 1;
-    });
+    const burningNearby = getCachedBurningNeighbors(enemy, 220);
     damage *= 1 + Math.min(burningNearby, 10) * 0.06;
     damage *= 1 + Math.min(enemy.burnStacks ?? 0, 8) * 0.05;
   }
   if (state.player.classId === "blood") {
-    let nearbyCount = 0;
-    visitEnemiesInRange(state.player.x, state.player.y, 180, (e) => {
-      if (!e.dead) nearbyCount += 1;
-    });
+    const nearbyCount = getCachedPlayerCrowdCount(180);
     damage *= 1 + Math.min(nearbyCount, 8) * 0.06;
   }
   const crit = false;
   return { damage, crit };
+}
+
+function getCachedPlayerCrowdCount(radius = 180) {
+  const cache = state.performance?.skillEvalCache ?? (state.performance.skillEvalCache = {});
+  const key = `playerCrowd:${radius}`;
+  const cached = cache[key];
+  if (cached?.tick === state.tick) {
+    return cached.value;
+  }
+  const radiusSq = radius * radius;
+  let count = 0;
+  visitEnemiesInRange(state.player.x, state.player.y, radius, (e) => {
+    if (e.dead) {
+      return;
+    }
+    const dx = e.x - state.player.x;
+    const dy = e.y - state.player.y;
+    if (dx * dx + dy * dy > radiusSq) {
+      return;
+    }
+    count += 1;
+  });
+  cache[key] = { tick: state.tick, value: count };
+  return count;
+}
+
+function isPlayerInsideCrimsonPoolCached() {
+  const cache = state.performance?.skillEvalCache ?? (state.performance.skillEvalCache = {});
+  const key = "insideCrimsonPool";
+  const cached = cache[key];
+  if (cached?.tick === state.tick) {
+    return cached.value;
+  }
+  const value = isPointInsideEffect(state.player.x, state.player.y, "crimson-pool");
+  cache[key] = { tick: state.tick, value };
+  return value;
+}
+
+function getCachedBurningNeighbors(enemy, radius = 220) {
+  if (
+    Number.isFinite(enemy.burningNeighborCacheUntil) &&
+    state.elapsed < enemy.burningNeighborCacheUntil &&
+    Number.isFinite(enemy.burningNeighborCacheCount)
+  ) {
+    return enemy.burningNeighborCacheCount;
+  }
+
+  const radiusSq = radius * radius;
+  let count = 0;
+  const cap = 16;
+  visitEnemiesInRange(enemy.x, enemy.y, radius, (e) => {
+    if (count >= cap || e.dead || e.id === enemy.id || (e.burnStacks ?? 0) <= 0) {
+      return;
+    }
+    const dx = e.x - enemy.x;
+    const dy = e.y - enemy.y;
+    if (dx * dx + dy * dy > radiusSq) {
+      return;
+    }
+    count += 1;
+  });
+  enemy.burningNeighborCacheCount = count;
+  enemy.burningNeighborCacheUntil = state.elapsed + 0.12;
+  return count;
 }
 
 function healPlayer(amount) {
@@ -6707,11 +6765,8 @@ function applyHitResponse(enemy, projectile, weapon, crit = false) {
 
   if (state.player.classId === "blood") {
     const closeRange = Math.hypot(enemy.x - state.player.x, enemy.y - state.player.y) <= 182;
-    const insidePool = isPointInsideEffect(state.player.x, state.player.y, "crimson-pool");
-    let crowdNearby = 0;
-    visitEnemiesInRange(state.player.x, state.player.y, 180, (e) => {
-      if (!e.dead) crowdNearby += 1;
-    });
+    const insidePool = isPlayerInsideCrimsonPoolCached();
+    const crowdNearby = getCachedPlayerCrowdCount(180);
     const crowdLifesteal = Math.min(crowdNearby, 8) * 0.022;
     const lifestealRatio =
       state.player.lifesteal +
@@ -6836,8 +6891,13 @@ function applyZoneTick(effect, enemy, distanceRatio = 1) {
     case "crosswind-strip":
     case "tempest-node":
       setEnemyStatusFlash(enemy, "wind", 0.3);
-      enemy.knockbackVX += ((enemy.x - effect.x) / Math.max(1, Math.hypot(enemy.x - effect.x, enemy.y - effect.y))) * 180;
-      enemy.knockbackVY += ((enemy.y - effect.y) / Math.max(1, Math.hypot(enemy.x - effect.x, enemy.y - effect.y))) * 180;
+      {
+        const dx = enemy.x - effect.x;
+        const dy = enemy.y - effect.y;
+        const dist = Math.max(1, Math.hypot(dx, dy));
+        enemy.knockbackVX += (dx / dist) * 180;
+        enemy.knockbackVY += (dy / dist) * 180;
+      }
       break;
     case "blizzard-wake":
     case "permafrost-seal":
