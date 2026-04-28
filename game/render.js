@@ -2376,6 +2376,13 @@ function drawEnemies() {
   ctx.shadowColor = "transparent";
 
   for (const enemy of state.enemies) {
+    // Per-enemy hard reset to prevent cross-entity canvas state leakage.
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.filter = "none";
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = "transparent";
+
     const pos = worldToScreen(enemy.x, enemy.y);
     if (!isVisible(pos.x, pos.y, 58)) {
       continue;
