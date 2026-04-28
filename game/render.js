@@ -749,58 +749,47 @@ function drawCircularTelegraph(attack, pos, perfTier = 0) {
   const telegraph = getAttackTelegraphProgress(attack);
   const fillRadius = radius * (0.16 + telegraph.fill * 0.84);
   const dashOffset = -state.elapsed * (140 + telegraph.fill * 150);
-
-  fillGradientDisc(
-    pos.x,
-    pos.y,
-    radius,
-    [
-      [0, colorWithAlpha(attack.color, 0.02 + telegraph.appear * 0.02)],
-      [0.78, colorWithAlpha(attack.color, 0.04 + telegraph.fill * 0.08)],
-      [1, colorWithAlpha(attack.color, 0)],
-    ],
-    "screen"
-  );
-  fillGradientDisc(
-    pos.x,
-    pos.y,
-    fillRadius,
-    [
-      [0, colorWithAlpha(attack.color, 0.04 + telegraph.fill * 0.08)],
-      [0.82, colorWithAlpha(attack.color, 0.12 + telegraph.fill * 0.15)],
-      [1, colorWithAlpha(attack.color, 0)],
-    ],
-    "screen"
-  );
+  attack.rgb ??= (() => {
+    const resolved = attack.color.includes("{a}") ? attack.color.replace("{a}", "1") : attack.color;
+    const p = parseColorComponents(resolved);
+    return `${p.r}, ${p.g}, ${p.b}`;
+  })();
+  const rgb = attack.rgb;
+  const ca = (a) => `rgba(${rgb}, ${a.toFixed(3)})`;
 
   const mainW = 3.2 + telegraph.fill * 2.6;
   ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.fillStyle = buildRadialGradient(pos.x, pos.y, 0, radius, [
+    [0, ca(0.02 + telegraph.appear * 0.02)],
+    [0.78, ca(0.04 + telegraph.fill * 0.08)],
+    [1, ca(0)],
+  ]);
+  ctx.beginPath(); ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = buildRadialGradient(pos.x, pos.y, 0, fillRadius, [
+    [0, ca(0.04 + telegraph.fill * 0.08)],
+    [0.82, ca(0.12 + telegraph.fill * 0.15)],
+    [1, ca(0)],
+  ]);
+  ctx.beginPath(); ctx.arc(pos.x, pos.y, fillRadius, 0, Math.PI * 2); ctx.fill();
+  ctx.globalCompositeOperation = "source-over";
   ctx.lineCap = "round";
   if (perfTier < 2) {
     ctx.setLineDash([]);
-    ctx.strokeStyle = colorWithAlpha(attack.color, 0.14 + telegraph.fill * 0.12);
+    ctx.strokeStyle = ca(0.14 + telegraph.fill * 0.12);
     ctx.lineWidth = mainW * 3.8;
-    ctx.beginPath();
-    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    ctx.beginPath(); ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2); ctx.stroke();
   }
-  ctx.strokeStyle = colorWithAlpha(attack.color, 0.42 + telegraph.fill * 0.32);
+  ctx.strokeStyle = ca(0.42 + telegraph.fill * 0.32);
   ctx.lineWidth = mainW;
   ctx.setLineDash([14, 10]);
   ctx.lineDashOffset = dashOffset;
-  ctx.beginPath();
-  ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.strokeStyle = colorWithAlpha(attack.color, 0.2 + telegraph.fill * 0.24 + telegraph.pulse * 0.08);
+  ctx.beginPath(); ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = ca(0.2 + telegraph.fill * 0.24 + telegraph.pulse * 0.08);
   ctx.lineWidth = 1.8 + telegraph.appear * 1.4;
   ctx.setLineDash([4, 12]);
   ctx.lineDashOffset = dashOffset * -0.66;
-  ctx.beginPath();
-  ctx.arc(pos.x, pos.y, radius * (0.88 + telegraph.pulse * 0.03), 0, Math.PI * 2);
-  ctx.stroke();
+  ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * (0.88 + telegraph.pulse * 0.03), 0, Math.PI * 2); ctx.stroke();
   ctx.restore();
 }
 
@@ -809,79 +798,57 @@ function drawBeamTelegraph(attack, start, end, perfTier = 0) {
   const beamWidth = attack.width * (0.32 + telegraph.fill * 0.36);
   const dashOffset = -state.elapsed * (180 + telegraph.fill * 190);
   const coreAlpha = 0.14 + telegraph.fill * 0.18;
-
-  drawGradientStroke(
-    start.x,
-    start.y,
-    end.x,
-    end.y,
-    attack.width * (0.56 + telegraph.fill * 0.22),
-    [
-      [0, colorWithAlpha(attack.color, 0)],
-      [0.12, colorWithAlpha(attack.color, 0.05 + telegraph.appear * 0.06)],
-      [0.5, colorWithAlpha(attack.color, 0.08 + telegraph.fill * 0.1)],
-      [0.88, colorWithAlpha(attack.color, 0.05 + telegraph.appear * 0.06)],
-      [1, colorWithAlpha(attack.color, 0)],
-    ],
-    "screen"
-  );
-  drawGradientStroke(
-    start.x,
-    start.y,
-    end.x,
-    end.y,
-    beamWidth,
-    [
-      [0, colorWithAlpha(attack.color, 0)],
-      [0.18, colorWithAlpha(attack.color, coreAlpha)],
-      [0.82, colorWithAlpha(attack.color, coreAlpha)],
-      [1, colorWithAlpha(attack.color, 0)],
-    ],
-    "screen"
-  );
+  attack.rgb ??= (() => {
+    const resolved = attack.color.includes("{a}") ? attack.color.replace("{a}", "1") : attack.color;
+    const p = parseColorComponents(resolved);
+    return `${p.r}, ${p.g}, ${p.b}`;
+  })();
+  const rgb = attack.rgb;
+  const ca = (a) => `rgba(${rgb}, ${a.toFixed(3)})`;
 
   const beamMainW = attack.width * (0.2 + telegraph.fill * 0.12);
   ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  // gradient stroke 1
+  const gs1 = ctx.createLinearGradient(start.x, start.y, end.x, end.y);
+  gs1.addColorStop(0, ca(0)); gs1.addColorStop(0.12, ca(0.05 + telegraph.appear * 0.06));
+  gs1.addColorStop(0.5, ca(0.08 + telegraph.fill * 0.1)); gs1.addColorStop(0.88, ca(0.05 + telegraph.appear * 0.06));
+  gs1.addColorStop(1, ca(0));
+  ctx.strokeStyle = gs1; ctx.lineWidth = attack.width * (0.56 + telegraph.fill * 0.22);
+  ctx.beginPath(); ctx.moveTo(start.x, start.y); ctx.lineTo(end.x, end.y); ctx.stroke();
+  // gradient stroke 2
+  const gs2 = ctx.createLinearGradient(start.x, start.y, end.x, end.y);
+  gs2.addColorStop(0, ca(0)); gs2.addColorStop(0.18, ca(coreAlpha));
+  gs2.addColorStop(0.82, ca(coreAlpha)); gs2.addColorStop(1, ca(0));
+  ctx.strokeStyle = gs2; ctx.lineWidth = beamWidth;
+  ctx.beginPath(); ctx.moveTo(start.x, start.y); ctx.lineTo(end.x, end.y); ctx.stroke();
+  // dashed strokes (switch to source-over)
+  ctx.globalCompositeOperation = "source-over";
   ctx.lineCap = "round";
   if (perfTier < 2) {
     ctx.setLineDash([]);
-    ctx.strokeStyle = colorWithAlpha(attack.color, 0.14 + telegraph.fill * 0.12);
+    ctx.strokeStyle = ca(0.14 + telegraph.fill * 0.12);
     ctx.lineWidth = beamMainW * 3.5;
-    ctx.beginPath();
-    ctx.moveTo(start.x, start.y);
-    ctx.lineTo(end.x, end.y);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(start.x, start.y); ctx.lineTo(end.x, end.y); ctx.stroke();
   }
-  ctx.strokeStyle = colorWithAlpha(attack.color, 0.48 + telegraph.fill * 0.24);
+  ctx.strokeStyle = ca(0.48 + telegraph.fill * 0.24);
   ctx.lineWidth = beamMainW;
-  ctx.setLineDash([22, 12]);
-  ctx.lineDashOffset = dashOffset;
-  ctx.beginPath();
-  ctx.moveTo(start.x, start.y);
-  ctx.lineTo(end.x, end.y);
-  ctx.stroke();
-
-  ctx.strokeStyle = colorWithAlpha(attack.color, 0.16 + telegraph.fill * 0.18 + telegraph.pulse * 0.08);
+  ctx.setLineDash([22, 12]); ctx.lineDashOffset = dashOffset;
+  ctx.beginPath(); ctx.moveTo(start.x, start.y); ctx.lineTo(end.x, end.y); ctx.stroke();
+  ctx.strokeStyle = ca(0.16 + telegraph.fill * 0.18 + telegraph.pulse * 0.08);
   ctx.lineWidth = attack.width * 0.08 + 1.5;
-  ctx.setLineDash([6, 13]);
-  ctx.lineDashOffset = dashOffset * -0.72;
-  ctx.beginPath();
-  ctx.moveTo(start.x, start.y);
-  ctx.lineTo(end.x, end.y);
-  ctx.stroke();
+  ctx.setLineDash([6, 13]); ctx.lineDashOffset = dashOffset * -0.72;
+  ctx.beginPath(); ctx.moveTo(start.x, start.y); ctx.lineTo(end.x, end.y); ctx.stroke();
+  // end disc
+  ctx.globalCompositeOperation = "screen";
+  const discR = attack.width * (0.32 + telegraph.fill * 0.18);
+  ctx.fillStyle = buildRadialGradient(end.x, end.y, 0, discR, [
+    [0, ca(0.16 + telegraph.fill * 0.12)],
+    [0.7, ca(0.06 + telegraph.fill * 0.08)],
+    [1, ca(0)],
+  ]);
+  ctx.beginPath(); ctx.arc(end.x, end.y, discR, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
-
-  fillGradientDisc(
-    end.x,
-    end.y,
-    attack.width * (0.32 + telegraph.fill * 0.18),
-    [
-      [0, colorWithAlpha(attack.color, 0.16 + telegraph.fill * 0.12)],
-      [0.7, colorWithAlpha(attack.color, 0.06 + telegraph.fill * 0.08)],
-      [1, colorWithAlpha(attack.color, 0)],
-    ],
-    "screen"
-  );
 }
 
 function drawEnemyAttacks() {
@@ -1687,68 +1654,62 @@ function drawEffects(layer = "base") {
           ctx.lineTo(pos.x + Math.cos(angle) * radius * 0.88, pos.y + Math.sin(angle) * radius * 0.88);
           ctx.stroke();
         }
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
         for (let i = 0; i < 6; i += 1) {
           const swirlAngle = effect.seed2 + state.elapsed * (3.4 + i * 0.18) + i * (Math.PI * 2 / 6);
           const swirlRadius = radius * (0.22 + (i % 3) * 0.11);
           const swirlX = pos.x + Math.cos(swirlAngle) * swirlRadius;
           const swirlY = pos.y + Math.sin(swirlAngle) * swirlRadius;
-          drawSoftBurstParticle(
-            swirlX,
-            swirlY,
-            8 + (i % 2) * 3,
-            palette.light(0.04 + envelope.alpha * 0.05),
-            tintAlpha(secondary, 0),
-            "screen"
-          );
+          const sprite = getSoftBurstSprite(palette.light(0.04 + envelope.alpha * 0.05), tintAlpha(secondary, 0), 8 + (i % 2) * 3);
+          ctx.drawImage(sprite, swirlX - sprite.width * 0.5, swirlY - sprite.height * 0.5);
         }
-        fillGradientRing(
-          pos.x,
-          pos.y,
-          radius * 0.22,
-          radius * 0.74,
-          [
-            [0, palette.secondary(0)],
-            [0.42, palette.primary(0.08 + envelope.alpha * 0.1)],
-            [0.68, palette.tertiary(0.1 + envelope.alpha * 0.12)],
-            [1, palette.secondary(0)],
-          ],
-          "screen"
-        );
+        const vbRingInner = radius * 0.22;
+        const vbRingOuter = radius * 0.74;
+        ctx.fillStyle = buildRadialGradient(pos.x, pos.y, vbRingInner, vbRingOuter, [
+          [0, palette.secondary(0)],
+          [0.42, palette.primary(0.08 + envelope.alpha * 0.1)],
+          [0.68, palette.tertiary(0.1 + envelope.alpha * 0.12)],
+          [1, palette.secondary(0)],
+        ]);
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, vbRingOuter, 0, Math.PI * 2);
+        ctx.arc(pos.x, pos.y, vbRingInner, 0, Math.PI * 2, true);
+        ctx.fill("evenodd");
+        ctx.restore();
       } else if (effect.kind === "tempest-node") {
-        fillGradientRing(
-          pos.x,
-          pos.y,
-          radius * 0.22,
-          radius * 0.96,
-          [
-            [0, palette.secondary(0)],
-            [0.36, palette.secondary(0.02 + envelope.alpha * 0.06)],
-            [0.66, palette.tertiary(0.05 + envelope.alpha * 0.1)],
-            [1, palette.secondary(0)],
-          ],
-          "screen"
-        );
+        // ring + 4 spirals under one "screen" block
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
+        const tnRingInner = radius * 0.22;
+        const tnRingOuter = radius * 0.96;
+        ctx.fillStyle = buildRadialGradient(pos.x, pos.y, tnRingInner, tnRingOuter, [
+          [0, palette.secondary(0)],
+          [0.36, palette.secondary(0.02 + envelope.alpha * 0.06)],
+          [0.66, palette.tertiary(0.05 + envelope.alpha * 0.1)],
+          [1, palette.secondary(0)],
+        ]);
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, tnRingOuter, 0, Math.PI * 2);
+        ctx.arc(pos.x, pos.y, tnRingInner, 0, Math.PI * 2, true);
+        ctx.fill("evenodd");
         for (let i = 0; i < 4; i += 1) {
           const spiralRadius = radius * (0.26 + i * 0.16);
-          withComposite("screen", () => {
-            ctx.strokeStyle = i % 2 === 0 ? palette.secondary(0.04 + envelope.alpha * 0.08) : palette.tertiary(0.03 + envelope.alpha * 0.07);
-            ctx.lineWidth = 9 - i * 1.4;
-            ctx.beginPath();
-            for (let step = 0; step <= 30; step += 1) {
-              const t = step / 30;
-              const theta = effect.seed + state.elapsed * (2.4 + i * 0.3) + t * Math.PI * 2.1;
-              const r = spiralRadius * (0.16 + t * 0.84);
-              const x = pos.x + Math.cos(theta) * r;
-              const y = pos.y + Math.sin(theta) * r * 0.68 - (1 - t) * 34;
-              if (step === 0) {
-                ctx.moveTo(x, y);
-              } else {
-                ctx.lineTo(x, y);
-              }
-            }
-            ctx.stroke();
-          });
+          ctx.strokeStyle = i % 2 === 0 ? palette.secondary(0.04 + envelope.alpha * 0.08) : palette.tertiary(0.03 + envelope.alpha * 0.07);
+          ctx.lineWidth = 9 - i * 1.4;
+          ctx.beginPath();
+          for (let step = 0; step <= 30; step += 1) {
+            const t = step / 30;
+            const theta = effect.seed + state.elapsed * (2.4 + i * 0.3) + t * Math.PI * 2.1;
+            const r = spiralRadius * (0.16 + t * 0.84);
+            const x = pos.x + Math.cos(theta) * r;
+            const y = pos.y + Math.sin(theta) * r * 0.68 - (1 - t) * 34;
+            if (step === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
+          }
+          ctx.stroke();
         }
+        ctx.restore();
+        // 5 source-over ellipse layers (no composite change needed)
         for (let i = 0; i < 5; i += 1) {
           const layerT = i / 4;
           const layerRadius = radius * (0.25 + layerT * 0.58);
@@ -1762,12 +1723,17 @@ function drawEffects(layer = "base") {
           ctx.ellipse(pos.x, pos.y + offsetY, layerRadius * (1 - layerT * 0.24), layerRadius * 0.44, 0, 0, Math.PI * 2);
           ctx.fill();
         }
+        // 4 swirls under one "screen" block
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
         for (let i = 0; i < 4; i += 1) {
           const swirlAngle = state.elapsed * (1.8 + i * 0.44) + i * (Math.PI * 2 / 4);
           const swirlX = pos.x + Math.cos(swirlAngle) * radius * (0.18 + i * 0.14);
           const swirlY = pos.y + Math.sin(swirlAngle) * radius * (0.18 + i * 0.14);
-          drawSoftBurstParticle(swirlX, swirlY, 12 + i * 4, palette.light(0.01 + envelope.alpha * 0.03), tintAlpha(secondary, 0), "screen");
+          const sprite = getSoftBurstSprite(palette.light(0.01 + envelope.alpha * 0.03), tintAlpha(secondary, 0), 12 + i * 4);
+          ctx.drawImage(sprite, swirlX - sprite.width * 0.5, swirlY - sprite.height * 0.5);
         }
+        ctx.restore();
         ctx.fillStyle = tintAlpha(secondary, 0.06 + envelope.alpha * 0.2);
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, radius * 0.18, 0, Math.PI * 2);
