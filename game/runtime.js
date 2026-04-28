@@ -6540,29 +6540,59 @@ function healPlayer(amount) {
   }
 }
 
+function getCombatFrameBudget() {
+  const perf = state.performance;
+  const budget = perf.combatBudget ?? (perf.combatBudget = {
+    tick: -1,
+    damageNumbers: 0,
+    hitSfx: 0,
+    hitFx: 0,
+  });
+  if (budget.tick !== state.tick) {
+    budget.tick = state.tick;
+    budget.damageNumbers = 0;
+    budget.hitSfx = 0;
+    budget.hitFx = 0;
+  }
+  return budget;
+}
+
 function dealDamageToEnemy(enemy, amount, source = "generic") {
   if (enemy.dead || amount <= 0) {
     return false;
   }
+  const perfTier = getPerformanceTier();
+  const frameBudget = getCombatFrameBudget();
+  const damageNumberFrameCap = perfTier >= 2 ? 12 : perfTier >= 1 ? 20 : 30;
   const isSkillSource = isSkillSoundSource(source);
-  if (!isSkillSource) {
-    spawnDamageNumber(enemy.x, enemy.y - enemy.radius * 0.4, amount, source);
-  } else {
-    const cadence = enemy.isBoss ? 0.12 : 0.18;
-    const nextAllowed = enemy.nextSkillDamageNumberAt ?? 0;
-    if (state.elapsed >= nextAllowed) {
+  if (frameBudget.damageNumbers < damageNumberFrameCap) {
+    if (!isSkillSource) {
       spawnDamageNumber(enemy.x, enemy.y - enemy.radius * 0.4, amount, source);
-      enemy.nextSkillDamageNumberAt = state.elapsed + cadence;
+      frameBudget.damageNumbers += 1;
+    } else {
+      const cadence = enemy.isBoss ? 0.12 : 0.18;
+      const nextAllowed = enemy.nextSkillDamageNumberAt ?? 0;
+      if (state.elapsed >= nextAllowed) {
+        spawnDamageNumber(enemy.x, enemy.y - enemy.radius * 0.4, amount, source);
+        enemy.nextSkillDamageNumberAt = state.elapsed + cadence;
+        frameBudget.damageNumbers += 1;
+      }
     }
+  } else {
+    enemy.nextSkillDamageNumberAt = Math.max(enemy.nextSkillDamageNumberAt ?? 0, state.elapsed + 0.08);
   }
   enemy.hp -= amount;
   if (!isSkillSource) {
-    if (enemy.isBoss) {
-      window.sfx?.play("bossHit");
-    } else if (source === "crit") {
-      window.sfx?.play("crit", { intensity: 1 });
-    } else {
-      window.sfx?.play("hit", { intensity: Math.min(1, 0.6 + amount / 120) });
+    const hitSfxFrameCap = perfTier >= 2 ? 1 : perfTier >= 1 ? 2 : 3;
+    if (frameBudget.hitSfx < hitSfxFrameCap) {
+      if (enemy.isBoss) {
+        window.sfx?.play("bossHit");
+      } else if (source === "crit") {
+        window.sfx?.play("crit", { intensity: 1 });
+      } else {
+        window.sfx?.play("hit", { intensity: Math.min(1, 0.6 + amount / 120) });
+      }
+      frameBudget.hitSfx += 1;
     }
   }
   if (enemy.isBoss) {
@@ -6801,8 +6831,10 @@ function applyHitResponse(enemy, projectile, weapon, crit = false) {
   }
 
   const perfTier = getPerformanceTier();
+  const frameBudget = getCombatFrameBudget();
+  const hitFxFrameCap = perfTier >= 2 ? 10 : perfTier >= 1 ? 16 : 24;
   const hitFxCadence = perfTier >= 2 ? 0.12 : perfTier >= 1 ? 0.08 : 0.04;
-  if (state.elapsed >= (enemy.nextHitFxAt ?? 0)) {
+  if (frameBudget.hitFx < hitFxFrameCap && state.elapsed >= (enemy.nextHitFxAt ?? 0)) {
     spawnHitEffect(
       enemy.x,
       enemy.y,
@@ -6811,6 +6843,7 @@ function applyHitResponse(enemy, projectile, weapon, crit = false) {
       dirY
     );
     enemy.nextHitFxAt = state.elapsed + hitFxCadence;
+    frameBudget.hitFx += 1;
   }
 }
 
@@ -7308,7 +7341,15 @@ function updateEffects(dt) {
     }
   }
 
-  state.effects = state.effects.filter((effect) => effect.life > 0);
+  let aliveEffectCount = 0;
+  for (let i = 0; i < state.effects.length; i += 1) {
+    const effect = state.effects[i];
+    if (effect.life > 0) {
+      state.effects[aliveEffectCount] = effect;
+      aliveEffectCount += 1;
+    }
+  }
+  state.effects.length = aliveEffectCount;
 
   for (const number of state.damageNumbers) {
     number.life -= dt;
@@ -7320,7 +7361,15 @@ function updateEffects(dt) {
     number.vx *= Math.exp(-5.4 * dt);
     number.vy = number.vy * Math.exp(-4.2 * dt) - 12 * dt;
   }
-  state.damageNumbers = state.damageNumbers.filter((number) => number.life > 0);
+  let aliveDamageCount = 0;
+  for (let i = 0; i < state.damageNumbers.length; i += 1) {
+    const number = state.damageNumbers[i];
+    if (number.life > 0) {
+      state.damageNumbers[aliveDamageCount] = number;
+      aliveDamageCount += 1;
+    }
+  }
+  state.damageNumbers.length = aliveDamageCount;
 }
 
 function updateEnemyAttacks(dt) {
