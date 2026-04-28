@@ -4682,13 +4682,20 @@ function updateEnemiesAndSpatialGrid(dt) {
 
   state.enemyGrid = buildEnemyGrid(state.enemies);
 
+  const localCrowd = countEnemiesNearPoint(player.x, player.y, 132, 36);
   const manyEnemies = state.enemies.length >= 110;
   const separationIntensity = manyEnemies && state.tick % 2 === 1 ? 0.6 : 1;
   const perfTier = getPerformanceTier();
-  const separationPairBudgetBase = perfTier >= 3 ? 1000 : perfTier >= 2 ? 1800 : perfTier >= 1 ? 2800 : 4200;
+  const crowdPressure = localCrowd >= 26;
+  const separationPairBudgetBase = perfTier >= 3 ? 900 : perfTier >= 2 ? 1500 : perfTier >= 1 ? 2400 : 3600;
   const crowdPenalty = state.enemies.length >= 140 ? 0.62 : state.enemies.length >= 100 ? 0.78 : 1;
-  const separationPairBudget = Math.max(700, Math.floor(separationPairBudgetBase * crowdPenalty));
-  applyEnemySeparation(state.enemyGrid, separationIntensity, player, separationPairBudget);
+  const pressurePenalty = crowdPressure ? 0.52 : 1;
+  const separationPairBudget = Math.max(320, Math.floor(separationPairBudgetBase * crowdPenalty * pressurePenalty));
+  const separationIntensityScaled = crowdPressure ? separationIntensity * 0.72 : separationIntensity;
+  const shouldRunSeparation = !crowdPressure || state.tick % 2 === 0;
+  if (shouldRunSeparation) {
+    applyEnemySeparation(state.enemyGrid, separationIntensityScaled, player, separationPairBudget);
+  }
 }
 
 function getEntityCollisionOptions(entity) {
@@ -6303,6 +6310,22 @@ function applyEnemySeparation(grid, intensity, player, pairBudget = 2200) {
   }
 }
 
+function countEnemiesNearPoint(x, y, radius, cap = Number.POSITIVE_INFINITY) {
+  const radiusSq = radius * radius;
+  let count = 0;
+  visitEnemiesInRange(x, y, radius, (enemy) => {
+    if (count >= cap) {
+      return;
+    }
+    const dx = enemy.x - x;
+    const dy = enemy.y - y;
+    if (dx * dx + dy * dy <= radiusSq) {
+      count += 1;
+    }
+  });
+  return count;
+}
+
 function resolveSeparationInBucket(enemies, intensity, budget) {
   for (let i = 0; i < enemies.length; i += 1) {
     if (budget.remaining <= 0) {
@@ -6941,7 +6964,7 @@ function onEnemyDefeated(enemy, source = "unknown") {
 function resolvePlayerEnemyDamage(dt, grid) {
   const player = state.player;
   let incomingDamage = 0;
-  const byType = {};
+  const byType = Object.create(null);
   const perfTier = getPerformanceTier();
   const pushBudgetMax = perfTier >= 2 ? 8 : perfTier >= 1 ? 16 : 28;
   let pushes = 0;
@@ -6975,7 +6998,7 @@ function resolvePlayerEnemyDamage(dt, grid) {
 
         const damage = enemy.touchDamage * dt;
         incomingDamage += damage;
-        byType[enemy.type] = Number(((byType[enemy.type] ?? 0) + damage).toFixed(2));
+        byType[enemy.type] = (byType[enemy.type] ?? 0) + damage;
         if (pushes < pushBudgetMax) {
           enemy.x -= (dx / distance) * Math.min(6, overlap);
           enemy.y -= (dy / distance) * Math.min(6, overlap);
@@ -6987,6 +7010,10 @@ function resolvePlayerEnemyDamage(dt, grid) {
 
   if (incomingDamage <= 0) {
     return;
+  }
+
+  for (const key of Object.keys(byType)) {
+    byType[key] = Number(byType[key].toFixed(2));
   }
 
   damagePlayer(incomingDamage, {
