@@ -386,9 +386,15 @@ function ensureTerrainRenderCache(zoom, startWorldX, startWorldY, endWorldX, end
   TERRAIN_CACHE_CTX.fillRect(0, 0, newCacheWidth, newCacheHeight);
   terrainRenderCache.waterTiles = [];
 
-  // Pre-generate all world feature regions for this viewport in one pass,
-  // so generateRegionFeatures() spikes don't happen scattered inside the tile loop
-  iterateWorldFeaturesInBounds(startWorldX, startWorldY, endWorldX, endWorldY, () => {});
+  // Pre-generate feature regions one full region beyond the viewport in each direction,
+  // so drawWorldFeatures never triggers generation for an on-screen region (pop-in)
+  iterateWorldFeaturesInBounds(
+    startWorldX - WORLD_FEATURE_REGION_SIZE,
+    startWorldY - WORLD_FEATURE_REGION_SIZE,
+    endWorldX + WORLD_FEATURE_REGION_SIZE,
+    endWorldY + WORLD_FEATURE_REGION_SIZE,
+    () => {}
+  );
 
   for (let tileYIndex = 0, worldY = startWorldY; worldY <= endWorldY; worldY += tileSize, tileYIndex += 1) {
     const screenY = tilePositionsY[tileYIndex];
@@ -471,7 +477,12 @@ function drawBackground() {
     }
   }
 
-  drawWorldFeatures(startWorldX, startWorldY, endWorldX, endWorldY);
+  drawWorldFeatures(
+    startWorldX - WORLD_FEATURE_REGION_SIZE,
+    startWorldY - WORLD_FEATURE_REGION_SIZE,
+    endWorldX + WORLD_FEATURE_REGION_SIZE,
+    endWorldY + WORLD_FEATURE_REGION_SIZE
+  );
 
   ctx.restore();
 
@@ -1301,58 +1312,47 @@ function drawEffects(layer = "base") {
       const radius = effect.size + progress * effect.growth;
       const palette = getEffectPalette(effect);
 
-      withComposite("screen", () => {
-        ctx.strokeStyle = palette.primary(0.12 + alpha * 0.36);
-        ctx.lineWidth = Math.max(1.2, effect.lineWidth * lifeRatio);
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-        ctx.stroke();
-      });
+      // Batch all "screen" draws for this effect into one save/restore pair
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+
+      ctx.strokeStyle = palette.primary(0.12 + alpha * 0.36);
+      ctx.lineWidth = Math.max(1.2, effect.lineWidth * lifeRatio);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
 
       for (const spark of effect.sparks ?? []) {
         const sparkRadius = radius * (spark.reach / Math.max(1, effect.growth + effect.size));
         const sparkX = pos.x + Math.cos(spark.angle) * sparkRadius;
         const sparkY = pos.y + Math.sin(spark.angle) * sparkRadius;
-        drawSoftBurstParticle(
-          sparkX,
-          sparkY,
-          spark.size,
-          palette.secondary(0.12 + alpha * 0.26),
-          palette.secondary(0),
-          "screen"
-        );
+        const sprite = getSoftBurstSprite(palette.secondary(0.12 + alpha * 0.26), palette.secondary(0), spark.size);
+        ctx.drawImage(sprite, sparkX - sprite.width * 0.5, sparkY - sprite.height * 0.5);
       }
 
       for (const ray of effect.rays ?? []) {
         const x2 = pos.x + Math.cos(ray.angle) * ray.reach;
         const y2 = pos.y + Math.sin(ray.angle) * ray.reach;
-        drawGradientStroke(
-          pos.x,
-          pos.y,
-          x2,
-          y2,
-          ray.lineWidth,
-          [
-            [0, palette.tertiary(0.04 + alpha * 0.12)],
-            [0.58, palette.tertiary(0.08 + alpha * 0.18)],
-            [1, palette.tertiary(0)],
-          ],
-          "screen"
-        );
+        const rayGrad = ctx.createLinearGradient(pos.x, pos.y, x2, y2);
+        rayGrad.addColorStop(0, palette.tertiary(0.04 + alpha * 0.12));
+        rayGrad.addColorStop(0.58, palette.tertiary(0.08 + alpha * 0.18));
+        rayGrad.addColorStop(1, palette.tertiary(0));
+        ctx.strokeStyle = rayGrad;
+        ctx.lineWidth = ray.lineWidth;
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
       }
 
       for (const ember of effect.embers ?? []) {
         const emberX = pos.x + ember.offsetX + ember.driftX * progress * 0.18;
         const emberY = pos.y + ember.offsetY - ember.rise * progress * 0.18;
-        drawSoftBurstParticle(
-          emberX,
-          emberY,
-          ember.size,
-          palette.light(0.1 + alpha * 0.16),
-          palette.light(0),
-          "screen"
-        );
+        const sprite = getSoftBurstSprite(palette.light(0.1 + alpha * 0.16), palette.light(0), ember.size);
+        ctx.drawImage(sprite, emberX - sprite.width * 0.5, emberY - sprite.height * 0.5);
       }
+
+      ctx.restore();
       continue;
     }
 
@@ -1456,39 +1456,28 @@ function drawEffects(layer = "base") {
         "screen"
       );
       const runeCount = fxTier >= 2 ? 0 : fxTier >= 1 ? 4 : 8;
-      for (let i = 0; i < runeCount; i += 1) {
-        const angle = effect.seed2 + state.elapsed * 0.72 + i * (Math.PI * 2 / runeCount);
-        const drift = 0.88 + Math.sin(state.elapsed * 1.8 + i * 0.9) * 0.08;
-        const runeX = pos.x + Math.cos(angle) * radius * (0.26 + (i % 3) * 0.18) * drift;
-        const runeY = pos.y + Math.sin(angle * 1.08) * radius * (0.24 + (i % 2) * 0.22) * drift;
-        const plusSize = 5.5 + (i % 3) * 1.6;
-        const lineWidth = 2 + (i % 2) * 0.45;
-        drawGradientStroke(
-          runeX - plusSize,
-          runeY,
-          runeX + plusSize,
-          runeY,
-          lineWidth,
-          [
-            [0, palette.light(0)],
-            [0.5, palette.light(0.06 + envelope.alpha * 0.1)],
-            [1, palette.light(0)],
-          ],
-          "screen"
-        );
-        drawGradientStroke(
-          runeX,
-          runeY - plusSize,
-          runeX,
-          runeY + plusSize,
-          lineWidth,
-          [
-            [0, palette.light(0)],
-            [0.5, palette.light(0.06 + envelope.alpha * 0.1)],
-            [1, palette.light(0)],
-          ],
-          "screen"
-        );
+      if (runeCount > 0) {
+        const runeMidColor = palette.light(0.06 + envelope.alpha * 0.1);
+        const runeEdgeColor = palette.light(0);
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
+        for (let i = 0; i < runeCount; i += 1) {
+          const angle = effect.seed2 + state.elapsed * 0.72 + i * (Math.PI * 2 / runeCount);
+          const drift = 0.88 + Math.sin(state.elapsed * 1.8 + i * 0.9) * 0.08;
+          const runeX = pos.x + Math.cos(angle) * radius * (0.26 + (i % 3) * 0.18) * drift;
+          const runeY = pos.y + Math.sin(angle * 1.08) * radius * (0.24 + (i % 2) * 0.22) * drift;
+          const plusSize = 5.5 + (i % 3) * 1.6;
+          ctx.lineWidth = 2 + (i % 2) * 0.45;
+          const hg = ctx.createLinearGradient(runeX - plusSize, runeY, runeX + plusSize, runeY);
+          hg.addColorStop(0, runeEdgeColor); hg.addColorStop(0.5, runeMidColor); hg.addColorStop(1, runeEdgeColor);
+          ctx.strokeStyle = hg;
+          ctx.beginPath(); ctx.moveTo(runeX - plusSize, runeY); ctx.lineTo(runeX + plusSize, runeY); ctx.stroke();
+          const vg = ctx.createLinearGradient(runeX, runeY - plusSize, runeX, runeY + plusSize);
+          vg.addColorStop(0, runeEdgeColor); vg.addColorStop(0.5, runeMidColor); vg.addColorStop(1, runeEdgeColor);
+          ctx.strokeStyle = vg;
+          ctx.beginPath(); ctx.moveTo(runeX, runeY - plusSize); ctx.lineTo(runeX, runeY + plusSize); ctx.stroke();
+        }
+        ctx.restore();
       }
       continue;
     }
@@ -1543,20 +1532,19 @@ function drawEffects(layer = "base") {
 
       if (fxTier < 2) {
         const moteCount = effect.kind === "tempest-node" || effect.kind === "ash-comet" || effect.kind === "grave-call" ? 6 : 4;
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
         for (let i = 0; i < moteCount; i += 1) {
           const angle = state.elapsed * (0.7 + i * 0.08) + i * (Math.PI * 2 / moteCount);
           const orbit = radius * (0.22 + ((i % 3) * 0.17));
           const mx = pos.x + Math.cos(angle) * orbit;
           const my = pos.y + Math.sin(angle * 1.15) * orbit;
-          drawSoftBurstParticle(
-            mx,
-            my,
-            8 + (i % 2) * 3,
-            colorWithAlpha(shadeColor(primary.includes("{a}") ? primary.replace("{a}", "1") : primary, 0.22), 0.1 + envelope.alpha * 0.14),
-            tintAlpha(i % 2 === 0 ? secondary : primary, 0),
-            "screen"
-          );
+          const innerColor = colorWithAlpha(shadeColor(primary.includes("{a}") ? primary.replace("{a}", "1") : primary, 0.22), 0.1 + envelope.alpha * 0.14);
+          const outerColor = tintAlpha(i % 2 === 0 ? secondary : primary, 0);
+          const sprite = getSoftBurstSprite(innerColor, outerColor, 8 + (i % 2) * 3);
+          ctx.drawImage(sprite, mx - sprite.width * 0.5, my - sprite.height * 0.5);
         }
+        ctx.restore();
       }
 
       if (effect.kind === "gale-ring") {
