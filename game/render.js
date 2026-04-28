@@ -2431,10 +2431,18 @@ function drawEnemies() {
 
     if (status) {
       const auraStrength = clamp(status.value, 0.18, 0.95);
-      ctx.fillStyle = tintAlpha(status.aura, 0.12 + auraStrength * 0.18);
+      const auraInner = enemy.radius + 2;
+      const auraOuter = enemy.radius + 8 + auraStrength * 4;
+      ctx.fillStyle = buildRadialGradient(drawX, drawY, auraInner, auraOuter, [
+        [0, tintAlpha(status.aura, 0)],
+        [0.52, tintAlpha(status.aura, 0.08 + auraStrength * 0.1)],
+        [0.82, tintAlpha(status.aura, 0.14 + auraStrength * 0.14)],
+        [1, tintAlpha(status.aura, 0)],
+      ]);
       ctx.beginPath();
-      ctx.arc(drawX, drawY, enemy.radius + 8 + auraStrength * 4, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.arc(drawX, drawY, auraOuter, 0, Math.PI * 2);
+      ctx.arc(drawX, drawY, auraInner, 0, Math.PI * 2, true);
+      ctx.fill("evenodd");
 
       ctx.save();
       if (perfTier === 0) {

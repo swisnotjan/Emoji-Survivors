@@ -6531,9 +6531,19 @@ function dealDamageToEnemy(enemy, amount, source = "generic") {
   if (enemy.dead || amount <= 0) {
     return false;
   }
-  spawnDamageNumber(enemy.x, enemy.y - enemy.radius * 0.4, amount, source);
+  const isSkillSource = isSkillSoundSource(source);
+  if (!isSkillSource) {
+    spawnDamageNumber(enemy.x, enemy.y - enemy.radius * 0.4, amount, source);
+  } else {
+    const cadence = enemy.isBoss ? 0.12 : 0.18;
+    const nextAllowed = enemy.nextSkillDamageNumberAt ?? 0;
+    if (state.elapsed >= nextAllowed) {
+      spawnDamageNumber(enemy.x, enemy.y - enemy.radius * 0.4, amount, source);
+      enemy.nextSkillDamageNumberAt = state.elapsed + cadence;
+    }
+  }
   enemy.hp -= amount;
-  if (!isSkillSoundSource(source)) {
+  if (!isSkillSource) {
     if (enemy.isBoss) {
       window.sfx?.play("bossHit");
     } else if (source === "crit") {
