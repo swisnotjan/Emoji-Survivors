@@ -2136,7 +2136,8 @@ function gameLoop(nowMs) {
 function updateFps(frameTime) {
   const perf = state.performance;
   const instantaneousFps = frameTime > 0 ? 1 / frameTime : 0;
-  perf.fpsSmooth = perf.fpsSmooth * 0.88 + instantaneousFps * 0.12;
+  const recoveryBlend = instantaneousFps > perf.fpsSmooth ? 0.22 : 0.12;
+  perf.fpsSmooth = perf.fpsSmooth * (1 - recoveryBlend) + instantaneousFps * recoveryBlend;
   perf.fpsTimer -= frameTime;
   if (perf.fpsTimer > 0) {
     return;
@@ -3558,13 +3559,25 @@ function findDensestEnemyCluster(originX, originY, radius = 220, maxRange = 820)
 
   const perfTier = getPerformanceTier();
   const anchorStride = perfTier >= 3 ? 4 : perfTier >= 2 ? 3 : perfTier >= 1 ? 2 : 1;
+  const anchorBudget = perfTier >= 3 ? 20 : perfTier >= 2 ? 32 : perfTier >= 1 ? 48 : 72;
+  const scanBudget = perfTier >= 3 ? 140 : perfTier >= 2 ? 220 : perfTier >= 1 ? 320 : 460;
+  let anchorsScanned = 0;
+  let scans = 0;
   for (let index = 0; index < anchors.length; index += anchorStride) {
+    if (anchorsScanned >= anchorBudget || scans >= scanBudget) {
+      break;
+    }
+    anchorsScanned += 1;
     const anchor = anchors[index];
     let score = 0;
     let centerX = 0;
     let centerY = 0;
 
     visitEnemiesInRange(anchor.x, anchor.y, radius, (enemy) => {
+      if (scans >= scanBudget) {
+        return;
+      }
+      scans += 1;
       const dx = enemy.x - anchor.x;
       const dy = enemy.y - anchor.y;
       const distanceSq = dx * dx + dy * dy;
@@ -7005,7 +7018,35 @@ function updateEffects(dt) {
   }
 
   const perfTier = getPerformanceTier();
-  const zoneTickTargetBudget = perfTier >= 3 ? 12 : perfTier >= 2 ? 20 : perfTier >= 1 ? 32 : 54;
+  const activeZoneEffects = state.effects.length > 0
+    ? state.effects.reduce((count, effect) => {
+      if (
+        effect.life > 0 &&
+        !effect.inFadeTail &&
+        (
+          effect.kind === "gale-ring" ||
+          effect.kind === "blizzard-wake" ||
+          effect.kind === "cinder-halo" ||
+          effect.kind === "vein-burst" ||
+          effect.kind === "crosswind-strip" ||
+          effect.kind === "tempest-node" ||
+          effect.kind === "sunspot" ||
+          effect.kind === "requiem-field" ||
+          effect.kind === "crimson-pool" ||
+          effect.kind === "bone-ward" ||
+          effect.kind === "holy-wave" ||
+          effect.kind === "permafrost-seal" ||
+          effect.kind === "ash-comet"
+        )
+      ) {
+        return count + 1;
+      }
+      return count;
+    }, 0)
+    : 0;
+  const baseZoneTickBudget = perfTier >= 3 ? 12 : perfTier >= 2 ? 20 : perfTier >= 1 ? 32 : 54;
+  const pressureDivisor = activeZoneEffects >= 10 ? 2.4 : activeZoneEffects >= 7 ? 1.9 : activeZoneEffects >= 5 ? 1.45 : 1;
+  const zoneTickTargetBudget = Math.max(8, Math.floor(baseZoneTickBudget / pressureDivisor));
   const zoneTickScanBudget = zoneTickTargetBudget * 4;
   function inZoneRadius(enemy, x, y, radius) {
     const dx = enemy.x - x;
