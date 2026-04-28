@@ -6800,7 +6800,18 @@ function applyHitResponse(enemy, projectile, weapon, crit = false) {
     healPlayer(weapon.projectileDamage * lifestealRatio);
   }
 
-  spawnHitEffect(enemy.x, enemy.y, passiveType === "fire" ? "ember" : passiveType === "frost" ? "icy" : passiveType === "wind" ? "holy" : "arcane", dirX, dirY);
+  const perfTier = getPerformanceTier();
+  const hitFxCadence = perfTier >= 2 ? 0.12 : perfTier >= 1 ? 0.08 : 0.04;
+  if (state.elapsed >= (enemy.nextHitFxAt ?? 0)) {
+    spawnHitEffect(
+      enemy.x,
+      enemy.y,
+      passiveType === "fire" ? "ember" : passiveType === "frost" ? "icy" : passiveType === "wind" ? "holy" : "arcane",
+      dirX,
+      dirY
+    );
+    enemy.nextHitFxAt = state.elapsed + hitFxCadence;
+  }
 }
 
 function onEnemyDefeated(enemy, source = "unknown") {
@@ -8827,6 +8838,9 @@ function startRunImmediate() {
   window.sfx?.startRunMusic?.();
   updateHud(true);
   render();
+  setTimeout(() => {
+    warmCombatEffectSpriteCaches?.();
+  }, 0);
   if (shouldShowHowTo) {
     openHowToPlay({ firstRun: true });
   }

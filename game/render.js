@@ -1242,6 +1242,41 @@ function getSoftBurstSprite(innerColor, outerColor, radius) {
   return canvas;
 }
 
+let _combatEffectCachesWarmed = false;
+function warmCombatEffectSpriteCaches() {
+  if (_combatEffectCachesWarmed) {
+    return;
+  }
+  _combatEffectCachesWarmed = true;
+  const hitPalettes = [
+    "rgba(100, 196, 255, 1)",
+    "rgba(255, 239, 168, 1)",
+    "rgba(255, 211, 116, 1)",
+    "rgba(255, 154, 68, 1)",
+    "rgba(196, 142, 255, 1)",
+    "rgba(255, 96, 138, 1)",
+  ];
+  const particleRadii = [2, 2.5, 3, 3.5, 4, 4.5, 5];
+  for (const color of hitPalettes) {
+    for (const radius of particleRadii) {
+      getParticleSprite(color, radius);
+    }
+  }
+  const burstPairs = [
+    ["rgba(100, 196, 255, 0.22)", "rgba(100, 196, 255, 0)"],
+    ["rgba(255, 239, 168, 0.2)", "rgba(255, 239, 168, 0)"],
+    ["rgba(255, 211, 116, 0.2)", "rgba(255, 211, 116, 0)"],
+    ["rgba(255, 154, 68, 0.22)", "rgba(255, 154, 68, 0)"],
+    ["rgba(196, 142, 255, 0.2)", "rgba(196, 142, 255, 0)"],
+  ];
+  const burstRadii = [6, 8, 10, 12, 14];
+  for (const [inner, outer] of burstPairs) {
+    for (const radius of burstRadii) {
+      getSoftBurstSprite(inner, outer, radius);
+    }
+  }
+}
+
 function drawGradientStroke(x1, y1, x2, y2, width, stops, composite = "source-over") {
   withComposite(composite, () => {
     const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
@@ -4507,6 +4542,9 @@ function pushEffect(effect) {
   const tier = getFxTier();
   const cap = tier >= 2 ? 90 : tier >= 1 ? 140 : 220;
   const incomingPriority = getEffectRetentionPriority(effect);
+  if (state.effects.length >= cap && incomingPriority <= 0) {
+    return;
+  }
   while (state.effects.length >= cap) {
     const trimIndex = findEffectTrimIndex(incomingPriority);
     if (trimIndex === -1) {
@@ -4523,12 +4561,18 @@ function pushParticleBurst(x, y, color, particles, options = {}) {
   if (!particles || particles.length === 0) {
     return;
   }
+  let maxLife = 0;
+  for (const particle of particles) {
+    if (particle.life > maxLife) {
+      maxLife = particle.life;
+    }
+  }
   pushEffect({
     kind: "particle-burst",
     x,
     y,
-    life: Math.max(...particles.map((particle) => particle.life)),
-    maxLife: Math.max(...particles.map((particle) => particle.life)),
+    life: maxLife,
+    maxLife,
     color,
     renderLayer: options.renderLayer ?? "base",
     composite: options.composite ?? "screen",
