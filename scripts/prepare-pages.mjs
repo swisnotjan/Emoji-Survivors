@@ -15,8 +15,6 @@ const entries = [
   "favicon.svg",
   "assets",
   "audio",
-  "skill-lab.html",
-  "skill-lab-bootstrap.js",
 ];
 
 async function copyEntry(relativePath) {

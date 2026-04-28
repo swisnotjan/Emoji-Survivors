@@ -217,6 +217,7 @@ window.render_game_to_text = function renderGameToText() {
       recentDamage: state.telemetry.recentDamage,
       final: state.telemetry.final,
     } : null,
+    telemetrySummary: getTelemetrySummary(),
     fps: state.performance.fpsDisplay,
     profiler: getPerformanceProfilerSnapshot(),
     profilerRecording: getPerformanceRecorderSummary(),
@@ -617,6 +618,9 @@ window.debug_game = {
     const active = setPerformanceRecorderEnabled(false);
     render();
     return active;
+  },
+  getTelemetrySummary() {
+    return getTelemetrySummary();
   },
   toggleProfilerRecording() {
     const active = togglePerformanceRecorder();

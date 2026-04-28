@@ -2270,6 +2270,13 @@ function saveMetaProgress() {
 function createDefaultTelemetryStore() {
   return {
     runs: [],
+    metrics: {
+      sessions: 0,
+      totalDurationSec: 0,
+      totalKills: 0,
+      byClass: {},
+      lastPlayedAt: null,
+    },
   };
 }
 
@@ -2278,10 +2285,32 @@ function normalizeTelemetryStore(candidate) {
   if (!candidate || typeof candidate !== "object" || !Array.isArray(candidate.runs)) {
     return fallback;
   }
+  const sourceMetrics = candidate.metrics && typeof candidate.metrics === "object" ? candidate.metrics : {};
+  const byClassSource = sourceMetrics.byClass && typeof sourceMetrics.byClass === "object"
+    ? sourceMetrics.byClass
+    : {};
+  const byClass = {};
+  for (const classId of CLASS_ORDER) {
+    const classEntry = byClassSource[classId] && typeof byClassSource[classId] === "object"
+      ? byClassSource[classId]
+      : {};
+    byClass[classId] = {
+      sessions: Math.max(0, Math.floor(classEntry.sessions ?? 0)),
+      durationSec: Math.max(0, Number(classEntry.durationSec ?? 0)),
+      kills: Math.max(0, Math.floor(classEntry.kills ?? 0)),
+    };
+  }
   return {
     runs: candidate.runs
       .filter((entry) => entry && typeof entry === "object")
       .slice(-40),
+    metrics: {
+      sessions: Math.max(0, Math.floor(sourceMetrics.sessions ?? 0)),
+      totalDurationSec: Math.max(0, Number(sourceMetrics.totalDurationSec ?? 0)),
+      totalKills: Math.max(0, Math.floor(sourceMetrics.totalKills ?? 0)),
+      byClass,
+      lastPlayedAt: typeof sourceMetrics.lastPlayedAt === "string" ? sourceMetrics.lastPlayedAt : null,
+    },
   };
 }
 
@@ -2414,8 +2443,39 @@ function finalizeRunTelemetry() {
   };
   telemetryStore.runs.push(state.telemetry);
   telemetryStore.runs = telemetryStore.runs.slice(-40);
+  const classId = state.player.classId;
+  const duration = Math.max(0, state.telemetry.final.duration ?? 0);
+  const kills = Math.max(0, state.telemetry.final.kills ?? 0);
+  telemetryStore.metrics.sessions += 1;
+  telemetryStore.metrics.totalDurationSec = Number((telemetryStore.metrics.totalDurationSec + duration).toFixed(2));
+  telemetryStore.metrics.totalKills += kills;
+  telemetryStore.metrics.lastPlayedAt = state.telemetry.final.endedAt;
+  const classMetrics = telemetryStore.metrics.byClass[classId] ?? { sessions: 0, durationSec: 0, kills: 0 };
+  classMetrics.sessions += 1;
+  classMetrics.durationSec = Number((classMetrics.durationSec + duration).toFixed(2));
+  classMetrics.kills += kills;
+  telemetryStore.metrics.byClass[classId] = classMetrics;
   saveTelemetryStore();
   return state.telemetry;
+}
+
+function getTelemetrySummary() {
+  const metrics = telemetryStore?.metrics ?? createDefaultTelemetryStore().metrics;
+  return {
+    sessions: metrics.sessions,
+    totalDurationSec: Number((metrics.totalDurationSec ?? 0).toFixed(2)),
+    totalKills: metrics.totalKills,
+    lastPlayedAt: metrics.lastPlayedAt,
+    byClass: CLASS_ORDER.reduce((acc, classId) => {
+      const entry = metrics.byClass?.[classId] ?? { sessions: 0, durationSec: 0, kills: 0 };
+      acc[classId] = {
+        sessions: Math.max(0, Math.floor(entry.sessions ?? 0)),
+        durationSec: Number(Math.max(0, entry.durationSec ?? 0).toFixed(2)),
+        kills: Math.max(0, Math.floor(entry.kills ?? 0)),
+      };
+      return acc;
+    }, {}),
+  };
 }
 
 
