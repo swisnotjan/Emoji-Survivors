@@ -1,4 +1,7 @@
 // Rendering, HUD updates, world visuals, shared utilities, and gameplay support helpers.
+let _frameCameraState = null;
+let _framePerformanceTier = -1;
+let _frameFxTier = -1;
 const VIGNETTE_CACHE = {
   width: 0,
   height: 0,
@@ -22,6 +25,9 @@ function render() {
   if (!state?.player) {
     return;
   }
+  _frameCameraState = null;
+  _framePerformanceTier = -1;
+  _frameFxTier = -1;
   ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
   if (!isProfilerEnabled()) {
     drawBackground();
@@ -2821,14 +2827,15 @@ function worldToScreen(worldX, worldY) {
 }
 
 function getCameraState() {
+  if (_frameCameraState !== null) return _frameCameraState;
   if (!state?.player) {
-    return {
+    return (_frameCameraState = {
       worldX: 0,
       worldY: 0,
       centerX: viewWidth * 0.5,
       centerY: viewHeight * 0.5,
       zoom: 0.78,
-    };
+    });
   }
   const runEnd = state.runEnd;
   const deathProgress = runEnd.active ? clamp(runEnd.timer / runEnd.duration, 0, 1) : 0;
@@ -2839,11 +2846,11 @@ function getCameraState() {
   const baseZoom = 0.78 + deathProgress * 0.36;
   const intro = state.bossIntro;
   if (!intro?.active) {
-    return { worldX: playerX, worldY: playerY, centerX, centerY, zoom: baseZoom };
+    return (_frameCameraState = { worldX: playerX, worldY: playerY, centerX, centerY, zoom: baseZoom });
   }
   const boss = state.enemies.find((enemy) => !enemy.dead && enemy.id === intro.targetEnemyId && enemy.isBoss);
   if (!boss) {
-    return { worldX: playerX, worldY: playerY, centerX, centerY, zoom: baseZoom };
+    return (_frameCameraState = { worldX: playerX, worldY: playerY, centerX, centerY, zoom: baseZoom });
   }
   const t = clamp(intro.timer / Math.max(0.0001, intro.duration), 0, 1);
   const zoomInPeak = 0.34;
@@ -2860,13 +2867,13 @@ function getCameraState() {
     travel = 1 - easeInOutCubic(clamp((t - holdEnd) / (1 - holdEnd), 0, 1));
   }
   const zoom = lerp(baseZoom, zoomInPeak, travel);
-  return {
+  return (_frameCameraState = {
     worldX: lerp(playerX, boss.x, travel),
     worldY: lerp(playerY, boss.y, travel),
     centerX,
     centerY,
     zoom,
-  };
+  });
 }
 
 function isVisible(x, y, padding) {

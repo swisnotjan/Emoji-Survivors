@@ -2603,6 +2603,7 @@ function getPerformanceProfilerSnapshot() {
 }
 
 function getPerformanceTier() {
+  if (_framePerformanceTier >= 0) return _framePerformanceTier;
   const perf = state.performance;
   const loadScore =
     state.enemies.length * 1 +
@@ -2612,19 +2613,20 @@ function getPerformanceTier() {
     state.damageNumbers.length * 0.4 +
     state.allies.length * 0.75;
   if (perf.fpsSmooth < 30 || loadScore > 340) {
-    return 3;
+    return (_framePerformanceTier = 3);
   }
   if (perf.fpsSmooth < 42 || loadScore > 250) {
-    return 2;
+    return (_framePerformanceTier = 2);
   }
   if (perf.fpsSmooth < 54 || loadScore > 170) {
-    return 1;
+    return (_framePerformanceTier = 1);
   }
-  return 0;
+  return (_framePerformanceTier = 0);
 }
 
 function getFxTier() {
-  return Math.min(2, getPerformanceTier());
+  if (_frameFxTier >= 0) return _frameFxTier;
+  return (_frameFxTier = Math.min(2, getPerformanceTier()));
 }
 
 function scaleFxCount(count) {
@@ -2814,7 +2816,7 @@ function updateDashState(dt) {
   dash.failFlashTimer = Math.max(0, dash.failFlashTimer - dt);
 
   if (dash.activeTimer <= 0) {
-    if (Math.hypot(dash.vx, dash.vy) > 0.0001) {
+    if (dash.vx * dash.vx + dash.vy * dash.vy > 0.00000001) {
       state.player.moveVX = dash.vx * 0.22;
       state.player.moveVY = dash.vy * 0.22;
     }
@@ -2891,7 +2893,8 @@ function isPointInsideEffect(x, y, effectKind) {
     if (effect.life <= 0 || effect.kind !== effectKind) {
       return false;
     }
-    return Math.hypot(effect.x - x, effect.y - y) <= effect.radius;
+    const _dx = effect.x - x, _dy = effect.y - y;
+    return _dx * _dx + _dy * _dy <= effect.radius * effect.radius;
   });
 }
 
@@ -2901,7 +2904,9 @@ function countNearbyBloodMarkedEnemies(radius) {
     if (enemy.dead || enemy.bloodMarkTimer <= 0) {
       return;
     }
-    if (Math.hypot(enemy.x - state.player.x, enemy.y - state.player.y) <= radius + enemy.radius) {
+    const _edx = enemy.x - state.player.x, _edy = enemy.y - state.player.y;
+    const _ert = radius + enemy.radius;
+    if (_edx * _edx + _edy * _edy <= _ert * _ert) {
       count += 1;
     }
   });
@@ -3394,7 +3399,11 @@ function pickXpDropPosition(anchorX, anchorY, radius, minSpacing, searchRadius) 
     const rawX = clamp(anchorX + Math.cos(angle) * distance, WORLD.left + 48, WORLD.right - 48);
     const rawY = clamp(anchorY + Math.sin(angle) * distance, WORLD.top + 48, WORLD.bottom - 48);
     const point = findNearbyWalkablePoint(rawX, rawY, radius, 72);
-    const clear = nearby.every((pickup) => Math.hypot(point.x - pickup.x, point.y - pickup.y) >= radius + pickup.radius + minSpacing);
+    const clear = nearby.every((pickup) => {
+      const _pdx = point.x - pickup.x, _pdy = point.y - pickup.y;
+      const _pmd = radius + pickup.radius + minSpacing;
+      return _pdx * _pdx + _pdy * _pdy >= _pmd * _pmd;
+    });
     if (clear) {
       return point;
     }
@@ -3427,10 +3436,13 @@ function pickPickupPoint(minDistance, maxDistance) {
     const distance = randRange(minDistance, maxDistance + edgePressure * 180);
     const x = clamp(state.player.x + Math.cos(angle) * distance, WORLD.left + 64, WORLD.right - 64);
     const y = clamp(state.player.y + Math.sin(angle) * distance, WORLD.top + 64, WORLD.bottom - 64);
-    const farEnoughFromPlayer = Math.hypot(x - state.player.x, y - state.player.y) >= 200;
-    const farEnoughFromPickups = state.pickups.every(
-      (pickup) => pickup.dead || Math.hypot(x - pickup.x, y - pickup.y) >= minimumPickupSpacing
-    );
+    const _fpx = x - state.player.x, _fpy = y - state.player.y;
+    const farEnoughFromPlayer = _fpx * _fpx + _fpy * _fpy >= 40000;
+    const farEnoughFromPickups = state.pickups.every((pickup) => {
+      if (pickup.dead) return true;
+      const _dx = x - pickup.x, _dy = y - pickup.y;
+      return _dx * _dx + _dy * _dy >= minimumPickupSpacing * minimumPickupSpacing;
+    });
     if (farEnoughFromPlayer && farEnoughFromPickups && isWalkablePoint(x, y, 20)) {
       return { x, y };
     }
@@ -3439,9 +3451,12 @@ function pickPickupPoint(minDistance, maxDistance) {
   for (let attempt = 0; attempt < 12; attempt += 1) {
     const x = clamp(state.player.x + randRange(-1, 1) * maxDistance, WORLD.left + 64, WORLD.right - 64);
     const y = clamp(state.player.y + randRange(-1, 1) * maxDistance, WORLD.top + 64, WORLD.bottom - 64);
-    const farEnoughFromPickups = state.pickups.every(
-      (pickup) => pickup.dead || Math.hypot(x - pickup.x, y - pickup.y) >= minimumPickupSpacing * 0.75
-    );
+    const _ms75 = minimumPickupSpacing * 0.75;
+    const farEnoughFromPickups = state.pickups.every((pickup) => {
+      if (pickup.dead) return true;
+      const _dx = x - pickup.x, _dy = y - pickup.y;
+      return _dx * _dx + _dy * _dy >= _ms75 * _ms75;
+    });
     if (farEnoughFromPickups && isWalkablePoint(x, y, 20)) {
       return { x, y };
     }
@@ -3969,7 +3984,10 @@ function castGraveCall(mastery) {
     tailLife: 0.32,
   });
   const nearbyCorpses = state.corpses
-    .filter((corpse) => Math.hypot(corpse.x - state.player.x, corpse.y - state.player.y) < 520)
+    .filter((corpse) => {
+      const _cdx = corpse.x - state.player.x, _cdy = corpse.y - state.player.y;
+      return _cdx * _cdx + _cdy * _cdy < 270400;
+    })
     .slice(0, 1 + mastery);
   const fallbackCount = nearbyCorpses.length === 0 ? 1 : 0;
   for (const corpse of nearbyCorpses) {
