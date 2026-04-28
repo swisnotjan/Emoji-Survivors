@@ -2364,10 +2364,16 @@ function drawEnemies() {
   const perfTier = getPerformanceTier();
   let activeFont = "";
 
+  ctx.save();
+  // Prevent enemies from inheriting alpha/composite/filter from previous render stages.
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#ffffff";
   ctx.filter = "none";
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = "transparent";
 
   for (const enemy of state.enemies) {
     const pos = worldToScreen(enemy.x, enemy.y);
@@ -2503,6 +2509,7 @@ function drawEnemies() {
     ctx.fillRect(barX, barY, barWidth * hpRatio, 4);
     ctx.fillStyle = "#ffffff";
   }
+  ctx.restore();
 }
 
 function drawAllies() {
