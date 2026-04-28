@@ -3294,11 +3294,12 @@ function spawnHealPickup() {
 function spawnXpDrops(enemy) {
   const { x: sourceX, y: sourceY, xpReward: totalXp, isBoss } = enemy;
   const scaledXp = Math.max(1, Math.round(totalXp * state.player.xpMultiplier));
+  const placementContext = getPickupPlacementContext();
   let orbBudget = scaledXp;
   if (isBoss) {
     const cacheValue = Math.max(26, Math.round(scaledXp * 0.42));
-    const cacheAnchor = pickXpDropPosition(sourceX, sourceY, 18, 20, 88);
-    spawnXpCache(cacheAnchor.x, cacheAnchor.y, cacheValue);
+    const cacheAnchor = pickXpDropPosition(sourceX, sourceY, 18, 20, 88, placementContext);
+    spawnXpCache(cacheAnchor.x, cacheAnchor.y, cacheValue, placementContext);
     orbBudget = Math.max(1, scaledXp - cacheValue);
   }
 
@@ -3311,9 +3312,10 @@ function spawnXpDrops(enemy) {
       sourceY + Math.sin(angle) * orbitRadius,
       12,
       16,
-      isBoss ? 124 : 56
+      isBoss ? 124 : 56,
+      placementContext
     );
-    state.pickups.push({
+    const pickup = {
       id: state.nextEntityId++,
       type: "xp-orb",
       x: anchor.x,
@@ -3330,13 +3332,15 @@ function spawnXpDrops(enemy) {
       vy: Math.sin(angle) * randRange(30, isBoss ? 115 : 75) - randRange(12, 36),
       absorbing: false,
       dead: false,
-    });
+    };
+    state.pickups.push(pickup);
+    placementContext.push(pickup);
     spawnPickupSpawnEffect(anchor.x, anchor.y, "xp-orb");
   }
 }
 
-function spawnXpCache(x, y, xpAmount) {
-  state.pickups.push({
+function spawnXpCache(x, y, xpAmount, placementContext = null) {
+  const pickup = {
     id: state.nextEntityId++,
     type: "xp-cache",
     x,
@@ -3353,7 +3357,11 @@ function spawnXpCache(x, y, xpAmount) {
     vy: 0,
     absorbing: false,
     dead: false,
-  });
+  };
+  state.pickups.push(pickup);
+  if (placementContext) {
+    placementContext.push(pickup);
+  }
   spawnPickupSpawnEffect(x, y, "xp-cache");
 }
 
@@ -3394,20 +3402,34 @@ function getXpOrbCap(enemy) {
   return 3;
 }
 
-function pickXpDropPosition(anchorX, anchorY, radius, minSpacing, searchRadius) {
-  const nearby = state.pickups.filter(
-    (pickup) =>
-      !pickup.dead &&
-      (pickup.type === "xp-orb" || pickup.type === "xp-cache" || pickup.type === "heal")
-  );
+function getPickupPlacementContext() {
+  const cache = state.performance?.pickupPlacementCache ?? (state.performance.pickupPlacementCache = {
+    tick: -1,
+    list: [],
+  });
+  if (cache.tick !== state.tick) {
+    cache.tick = state.tick;
+    cache.list = state.pickups.filter(
+      (pickup) =>
+        !pickup.dead &&
+        (pickup.type === "xp-orb" || pickup.type === "xp-cache" || pickup.type === "heal")
+    );
+  }
+  return cache.list;
+}
 
-  for (let attempt = 0; attempt < 28; attempt += 1) {
+function pickXpDropPosition(anchorX, anchorY, radius, minSpacing, searchRadius, nearby = null) {
+  const nearbyPickups = nearby ?? getPickupPlacementContext();
+  const perfTier = getPerformanceTier();
+  const maxAttempts = perfTier >= 2 ? 12 : perfTier >= 1 ? 18 : 28;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const angle = Math.random() * Math.PI * 2;
     const distance = attempt === 0 ? 0 : randRange(6, searchRadius);
     const rawX = clamp(anchorX + Math.cos(angle) * distance, WORLD.left + 48, WORLD.right - 48);
     const rawY = clamp(anchorY + Math.sin(angle) * distance, WORLD.top + 48, WORLD.bottom - 48);
     const point = findNearbyWalkablePoint(rawX, rawY, radius, 72);
-    const clear = nearby.every((pickup) => {
+    const clear = nearbyPickups.every((pickup) => {
       const _pdx = point.x - pickup.x, _pdy = point.y - pickup.y;
       const _pmd = radius + pickup.radius + minSpacing;
       return _pdx * _pdx + _pdy * _pdy >= _pmd * _pmd;
