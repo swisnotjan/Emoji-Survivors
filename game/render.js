@@ -344,12 +344,13 @@ function updateMiniMapObjectives() {
 }
 
 function ensureTerrainRenderCache(zoom, startWorldX, startWorldY, endWorldX, endWorldY) {
+  // Rebuild only when zoom changes or camera moves 4+ tiles — reduces rebuild frequency ~4x
+  const hysteresisWorld = TERRAIN_TILE_SIZE * 4;
   if (
     terrainRenderCache.zoom === zoom &&
-    terrainRenderCache.startWorldX === startWorldX &&
-    terrainRenderCache.startWorldY === startWorldY &&
-    terrainRenderCache.endWorldX === endWorldX &&
-    terrainRenderCache.endWorldY === endWorldY
+    terrainRenderCache.lastRebuildStartX !== null &&
+    Math.abs(startWorldX - terrainRenderCache.lastRebuildStartX) < hysteresisWorld &&
+    Math.abs(startWorldY - terrainRenderCache.lastRebuildStartY) < hysteresisWorld
   ) {
     return;
   }
@@ -366,13 +367,22 @@ function ensureTerrainRenderCache(zoom, startWorldX, startWorldY, endWorldX, end
   );
   const lastTileX = tilePositionsX[tilePositionsX.length - 1] ?? 0;
   const lastTileY = tilePositionsY[tilePositionsY.length - 1] ?? 0;
-  TERRAIN_CACHE_CANVAS.width = Math.max(1, lastTileX + drawSize + 2);
-  TERRAIN_CACHE_CANVAS.height = Math.max(1, lastTileY + drawSize + 2);
-
-  TERRAIN_CACHE_CTX.clearRect(0, 0, TERRAIN_CACHE_CANVAS.width, TERRAIN_CACHE_CANVAS.height);
+  const newCacheWidth = Math.max(1, lastTileX + drawSize + 2);
+  const newCacheHeight = Math.max(1, lastTileY + drawSize + 2);
+  // Assigning canvas.width always clears + resets GPU context state — only do it when size actually changes
+  if (TERRAIN_CACHE_CANVAS.width !== newCacheWidth || TERRAIN_CACHE_CANVAS.height !== newCacheHeight) {
+    TERRAIN_CACHE_CANVAS.width = newCacheWidth;
+    TERRAIN_CACHE_CANVAS.height = newCacheHeight;
+  } else {
+    TERRAIN_CACHE_CTX.clearRect(0, 0, newCacheWidth, newCacheHeight);
+  }
   TERRAIN_CACHE_CTX.fillStyle = "#111629";
-  TERRAIN_CACHE_CTX.fillRect(0, 0, TERRAIN_CACHE_CANVAS.width, TERRAIN_CACHE_CANVAS.height);
+  TERRAIN_CACHE_CTX.fillRect(0, 0, newCacheWidth, newCacheHeight);
   terrainRenderCache.waterTiles = [];
+
+  // Pre-generate all world feature regions for this viewport in one pass,
+  // so generateRegionFeatures() spikes don't happen scattered inside the tile loop
+  iterateWorldFeaturesInBounds(startWorldX, startWorldY, endWorldX, endWorldY, () => {});
 
   for (let tileYIndex = 0, worldY = startWorldY; worldY <= endWorldY; worldY += tileSize, tileYIndex += 1) {
     const screenY = tilePositionsY[tileYIndex];
@@ -402,6 +412,8 @@ function ensureTerrainRenderCache(zoom, startWorldX, startWorldY, endWorldX, end
   terrainRenderCache.startWorldY = startWorldY;
   terrainRenderCache.endWorldX = endWorldX;
   terrainRenderCache.endWorldY = endWorldY;
+  terrainRenderCache.lastRebuildStartX = startWorldX;
+  terrainRenderCache.lastRebuildStartY = startWorldY;
 }
 
 function drawBackground() {
@@ -433,7 +445,8 @@ function drawBackground() {
   const endWorldX = Math.ceil((camera.worldX + halfWorldViewWidth) / tileSize) * tileSize + renderPadding;
   const endWorldY = Math.ceil((camera.worldY + halfWorldViewHeight) / tileSize) * tileSize + renderPadding;
   ensureTerrainRenderCache(zoom, startWorldX, startWorldY, endWorldX, endWorldY);
-  const terrainOrigin = worldToScreen(startWorldX, startWorldY);
+  // Use stored cache origin (not current-frame startWorldX) so canvas stays aligned between rebuilds
+  const terrainOrigin = worldToScreen(terrainRenderCache.startWorldX, terrainRenderCache.startWorldY);
   const terrainOriginX = Math.floor(terrainOrigin.x);
   const terrainOriginY = Math.floor(terrainOrigin.y);
   ctx.drawImage(TERRAIN_CACHE_CANVAS, terrainOriginX, terrainOriginY);
@@ -461,14 +474,32 @@ function drawBackground() {
   ctx.strokeRect(worldTopLeft.x + 0.5, worldTopLeft.y + 0.5, worldWidth, worldHeight);
 }
 
-function drawWorldFeatures(minX, minY, maxX, maxY) {
-  const features = [];
-  iterateWorldFeaturesInBounds(minX, minY, maxX, maxY, (feature) => {
-    features.push(feature);
-  });
-  features.sort((a, b) => (a.anchorY ?? 0) - (b.anchorY ?? 0));
+// Feature list is static once generated — only re-collect when a different set of regions enters the viewport
+let worldFeaturesDrawCache = { startRX: null, startRY: null, endRX: null, endRY: null, features: [] };
 
-  for (const feature of features) {
+function drawWorldFeatures(minX, minY, maxX, maxY) {
+  const startRX = regionIndexX(minX);
+  const startRY = regionIndexY(minY);
+  const endRX = regionIndexX(maxX);
+  const endRY = regionIndexY(maxY);
+
+  if (
+    worldFeaturesDrawCache.startRX !== startRX ||
+    worldFeaturesDrawCache.startRY !== startRY ||
+    worldFeaturesDrawCache.endRX !== endRX ||
+    worldFeaturesDrawCache.endRY !== endRY
+  ) {
+    const features = [];
+    iterateWorldFeaturesInBounds(minX, minY, maxX, maxY, (feature) => { features.push(feature); });
+    features.sort((a, b) => (a.anchorY ?? 0) - (b.anchorY ?? 0));
+    worldFeaturesDrawCache.startRX = startRX;
+    worldFeaturesDrawCache.startRY = startRY;
+    worldFeaturesDrawCache.endRX = endRX;
+    worldFeaturesDrawCache.endRY = endRY;
+    worldFeaturesDrawCache.features = features;
+  }
+
+  for (const feature of worldFeaturesDrawCache.features) {
     if (feature.group === "solid") {
       drawSolidFeature(feature);
       continue;
@@ -521,12 +552,12 @@ function drawRockFeature(feature) {
 
 function drawTreeFeature(feature) {
   const pos = worldToScreen(feature.anchorX, feature.anchorY);
-  if (!isVisible(pos.x, pos.y, (feature.canopyRadius ?? 52) + 24)) {
+  const treeSize = Math.max(22, ((feature.canopyRadius ?? 52) * 1.3) / getCameraZoom());
+  if (!isVisible(pos.x, pos.y, treeSize * 0.7 + 20)) {
     return;
   }
   const perfTier = getPerformanceTier();
   const treeEmoji = feature.treeEmoji ?? "🌲";
-  const treeSize = Math.max(22, ((feature.canopyRadius ?? 52) * 1.3) / getCameraZoom());
   if (drawEmojiSprite(treeEmoji, pos.x, pos.y - treeSize * 0.16, treeSize, {
     shadowBlur: perfTier <= 1 ? 14 : 0,
     shadowColor: "rgba(20, 30, 22, 0.34)",
@@ -547,14 +578,16 @@ function drawTreeFeature(feature) {
 
 function drawCandleFeature(feature) {
   const pos = worldToScreen(feature.anchorX, feature.anchorY);
-  if (!isVisible(pos.x, pos.y, 40)) {
+  const zoom = getCameraZoom();
+  const size = Math.max(14, (feature.visualSize ?? 18) / zoom);
+  const glowRadius = 24 / zoom;
+  if (!isVisible(pos.x, pos.y, size + glowRadius + 16)) {
     return;
   }
   const flicker = 0.74 + Math.sin(state.elapsed * 8.4 + (feature.anchorX + feature.anchorY) * 0.02) * 0.16;
-  const size = Math.max(14, (feature.visualSize ?? 18) / getCameraZoom());
   ctx.save();
   ctx.globalAlpha = 0.82;
-  const glow = ctx.createRadialGradient(pos.x, pos.y - size * 0.22, 1, pos.x, pos.y - size * 0.22, 24 / getCameraZoom());
+  const glow = ctx.createRadialGradient(pos.x, pos.y - size * 0.22, 1, pos.x, pos.y - size * 0.22, glowRadius);
   glow.addColorStop(0, `rgba(255, 215, 132, ${(0.22 + flicker * 0.18).toFixed(3)})`);
   glow.addColorStop(1, "rgba(255, 215, 132, 0)");
   ctx.fillStyle = glow;
@@ -4242,20 +4275,10 @@ function getTerrainTileCacheKey(tileX, tileY) {
 
 function setCachedTerrainTile(cacheKey, value) {
   TERRAIN_TILE_CACHE.set(cacheKey, value);
-  const highWaterMark = TERRAIN_TILE_CACHE_MAX_ENTRIES + TERRAIN_TILE_CACHE_OVERFLOW_BUFFER;
-  if (TERRAIN_TILE_CACHE.size <= highWaterMark) {
-    return;
-  }
-  const targetSize = Math.max(
-    0,
-    TERRAIN_TILE_CACHE_MAX_ENTRIES - Math.max(0, TERRAIN_TILE_CACHE_PRUNE_BATCH)
-  );
-  while (TERRAIN_TILE_CACHE.size > targetSize) {
-    const oldestKey = TERRAIN_TILE_CACHE.keys().next().value;
-    if (oldestKey == null) {
-      break;
-    }
-    TERRAIN_TILE_CACHE.delete(oldestKey);
+  // Evict one oldest entry per insertion when over limit — spreads pruning cost across frames
+  // instead of a single 4096-deletion spike when the high-water mark is crossed
+  if (TERRAIN_TILE_CACHE.size > TERRAIN_TILE_CACHE_MAX_ENTRIES) {
+    TERRAIN_TILE_CACHE.delete(TERRAIN_TILE_CACHE.keys().next().value);
   }
 }
 
@@ -4353,9 +4376,13 @@ function getTerrainTileBase(worldX, worldY) {
     fill = mixHexColor(fill, waterColor, shoreBlend);
   }
 
+  const fillRgb = parseColorComponents(fill);
   const base = {
     type: terrainType,
     baseFill: fill,
+    baseFillR: fillRgb.r,
+    baseFillG: fillRgb.g,
+    baseFillB: fillRgb.b,
     waterDepth,
     speckColor,
     speckAlpha,
@@ -4375,8 +4402,10 @@ function sampleTerrainTile(worldX, worldY) {
     const rippleWave =
       Math.sin(state.elapsed * (1.8 + base.waterDepth * 1.6) + worldX * 0.02 + worldY * 0.016) * 0.5 +
       Math.sin(state.elapsed * (2.6 + base.waterDepth * 2.2) - worldX * 0.017 + worldY * 0.022) * 0.5;
-    const rippleStrength = base.waterDepth * 0.16;
-    fill = shadeColor(fill, rippleWave * rippleStrength);
+    const mix = rippleWave * base.waterDepth * 0.16;
+    const target = mix >= 0 ? 255 : 0;
+    const abs = Math.abs(mix);
+    fill = `rgb(${Math.round(base.baseFillR + (target - base.baseFillR) * abs)}, ${Math.round(base.baseFillG + (target - base.baseFillG) * abs)}, ${Math.round(base.baseFillB + (target - base.baseFillB) * abs)})`;
   }
 
   return {

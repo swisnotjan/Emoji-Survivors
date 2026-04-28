@@ -1884,6 +1884,10 @@ function invalidateBackgroundCache() {
   terrainRenderCache.endWorldX = null;
   terrainRenderCache.endWorldY = null;
   terrainRenderCache.waterTiles = [];
+  terrainRenderCache.lastRebuildStartX = null;
+  terrainRenderCache.lastRebuildStartY = null;
+  // Force drawWorldFeatures to re-collect features on next frame (world seed may have changed)
+  worldFeaturesDrawCache.startRX = null;
 }
 
 function requestHudRefresh(force = false) {
@@ -2104,10 +2108,6 @@ function gameLoop(nowMs) {
 
   const now = nowMs / 1000;
   const elapsed = now - previousTime;
-  if (elapsed < TARGET_FRAME_TIME) {
-    requestAnimationFrame(gameLoop);
-    return;
-  }
   const frameTime = Math.min(elapsed, MAX_FRAME_TIME);
   previousTime = now;
   updateFps(frameTime);

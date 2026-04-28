@@ -1003,7 +1003,7 @@ body {
     linear-gradient(165deg, rgba(6, 11, 20, 0.74), rgba(7, 12, 20, 0.56)),
     radial-gradient(circle at 18% 18%, rgba(112, 158, 255, 0.22), transparent 34%),
     radial-gradient(circle at 78% 12%, rgba(86, 148, 255, 0.2), transparent 36%),
-    url("assets/start-background.png") center center / cover no-repeat;
+    url("assets/start-background.webp") center center / cover no-repeat;
 }
 
 .mobile-block-overlay {

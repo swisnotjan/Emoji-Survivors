@@ -2629,6 +2629,8 @@ let terrainRenderCache = {
   endWorldX: null,
   endWorldY: null,
   waterTiles: [],
+  lastRebuildStartX: null,
+  lastRebuildStartY: null,
 };
 
 let metaProgress;
