@@ -13,6 +13,10 @@ const entries = [
   "game",
   "game-config.js",
   "favicon.svg",
+  "assets",
+  "audio",
+  "skill-lab.html",
+  "skill-lab-bootstrap.js",
 ];
 
 async function copyEntry(relativePath) {

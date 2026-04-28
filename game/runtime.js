@@ -255,6 +255,7 @@ function createInitialState(classId = "wind") {
     pickups: [],
     effects: [],
     damageNumbers: [],
+    portal: null,
     enemyGrid: {
       map: new Map(),
       cells: [],
@@ -2699,6 +2700,7 @@ function update(dt) {
     profileUpdateStage("enemyAttacks", () => updateEnemyAttacks(simDt));
     profileUpdateStage("playerDamage", () => resolvePlayerEnemyDamage(simDt, state.enemyGrid));
     profileUpdateStage("pickups", () => updatePickups(simDt));
+    profileUpdateStage("portal", () => updatePortal?.(simDt));
     profileUpdateStage("cleanup", cleanupDeadEntities);
     profileUpdateStage("archiveProgress", () => updateArchiveRunProgress(simDt));
   } else {
@@ -2718,6 +2720,7 @@ function update(dt) {
     updateEnemyAttacks(simDt);
     resolvePlayerEnemyDamage(simDt, state.enemyGrid);
     updatePickups(simDt);
+    updatePortal?.(simDt);
     cleanupDeadEntities();
     updateArchiveRunProgress(simDt);
   }
@@ -8660,6 +8663,7 @@ function startRunImmediate() {
   state = createInitialState(metaProgress.selectedClassId);
   state.running = true;
   ensurePerformanceRecorderRun();
+  initPortal?.();
   startOverlay.classList.add("hidden");
   window.sfx?.play("runStart");
   window.sfx?.startRunMusic?.();

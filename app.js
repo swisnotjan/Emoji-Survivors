@@ -58,6 +58,10 @@ let gameBootstrapped = false;
 if (!applyGameplayAccessGate()) {
   bootstrapGame();
   gameBootstrapped = true;
+  // Auto-start if player arrived from another Vibe Jam game via portal
+  if (new URLSearchParams(window.location.search).get("portal") === "true") {
+    startRun?.();
+  }
 }
 
 window.addEventListener("resize", () => {

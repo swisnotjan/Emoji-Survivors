@@ -25,6 +25,7 @@ function render() {
   ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
   if (!isProfilerEnabled()) {
     drawBackground();
+    drawPortal?.();
     drawEffects("base");
     drawEffects("top");
     drawPickups();
@@ -42,6 +43,7 @@ function render() {
   }
 
   profileRenderStage("background", drawBackground);
+  profileRenderStage("portal", () => drawPortal?.());
   profileRenderStage("effectsBase", () => drawEffects("base"));
   profileRenderStage("effectsTop", () => drawEffects("top"));
   profileRenderStage("pickups", drawPickups);
