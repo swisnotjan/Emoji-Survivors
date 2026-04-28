@@ -4662,7 +4662,11 @@ function updateEnemiesAndSpatialGrid(dt) {
 
   const manyEnemies = state.enemies.length >= 110;
   const separationIntensity = manyEnemies && state.tick % 2 === 1 ? 0.6 : 1;
-  applyEnemySeparation(state.enemyGrid, separationIntensity, player);
+  const perfTier = getPerformanceTier();
+  const separationPairBudgetBase = perfTier >= 3 ? 1000 : perfTier >= 2 ? 1800 : perfTier >= 1 ? 2800 : 4200;
+  const crowdPenalty = state.enemies.length >= 140 ? 0.62 : state.enemies.length >= 100 ? 0.78 : 1;
+  const separationPairBudget = Math.max(700, Math.floor(separationPairBudgetBase * crowdPenalty));
+  applyEnemySeparation(state.enemyGrid, separationIntensity, player, separationPairBudget);
 }
 
 function getEntityCollisionOptions(entity) {
@@ -6240,7 +6244,7 @@ function resolveAllyEnemyCollisions(grid) {
   state.allies = state.allies.filter((ally) => !ally.dead);
 }
 
-function applyEnemySeparation(grid, intensity, player) {
+function applyEnemySeparation(grid, intensity, player, pairBudget = 2200) {
   if (intensity <= 0) {
     return;
   }
@@ -6249,7 +6253,11 @@ function applyEnemySeparation(grid, intensity, player) {
   const py = player?.y ?? 0;
   const skipFarOddTick = state.tick % 2 !== 0;
 
+  const budget = { remaining: pairBudget };
   for (const cell of grid.cells) {
+    if (budget.remaining <= 0) {
+      break;
+    }
     const cellCX = (cell.x + 0.5) * ENEMY_CELL_SIZE;
     const cellCY = (cell.y + 0.5) * ENEMY_CELL_SIZE;
     const cdx = cellCX - px;
@@ -6258,47 +6266,64 @@ function applyEnemySeparation(grid, intensity, player) {
       continue;
     }
 
-    resolveSeparationInBucket(cell.enemies, intensity);
+    resolveSeparationInBucket(cell.enemies, intensity, budget);
 
     for (const [offsetX, offsetY] of ENEMY_NEIGHBOR_OFFSETS) {
+      if (budget.remaining <= 0) {
+        break;
+      }
       const neighbor = grid.map.get(cellKey(cell.x + offsetX, cell.y + offsetY));
       if (!neighbor) {
         continue;
       }
-      resolveSeparationAcrossBuckets(cell.enemies, neighbor.enemies, intensity);
+      resolveSeparationAcrossBuckets(cell.enemies, neighbor.enemies, intensity, budget);
     }
   }
 }
 
-function resolveSeparationInBucket(enemies, intensity) {
+function resolveSeparationInBucket(enemies, intensity, budget) {
   for (let i = 0; i < enemies.length; i += 1) {
+    if (budget.remaining <= 0) {
+      return;
+    }
     const a = enemies[i];
     if (a.dead) {
       continue;
     }
 
     for (let j = i + 1; j < enemies.length; j += 1) {
+      if (budget.remaining <= 0) {
+        return;
+      }
       const b = enemies[j];
       if (b.dead) {
         continue;
       }
 
+      budget.remaining -= 1;
       separateEnemyPair(a, b, intensity);
     }
   }
 }
 
-function resolveSeparationAcrossBuckets(groupA, groupB, intensity) {
+function resolveSeparationAcrossBuckets(groupA, groupB, intensity, budget) {
   for (const a of groupA) {
+    if (budget.remaining <= 0) {
+      return;
+    }
     if (a.dead) {
       continue;
     }
 
     for (const b of groupB) {
+      if (budget.remaining <= 0) {
+        return;
+      }
       if (b.dead) {
         continue;
       }
 
+      budget.remaining -= 1;
       separateEnemyPair(a, b, intensity);
     }
   }
@@ -6895,6 +6920,9 @@ function resolvePlayerEnemyDamage(dt, grid) {
   const player = state.player;
   let incomingDamage = 0;
   const byType = {};
+  const perfTier = getPerformanceTier();
+  const pushBudgetMax = perfTier >= 2 ? 8 : perfTier >= 1 ? 16 : 28;
+  let pushes = 0;
 
   const cellX = Math.floor(player.x / ENEMY_CELL_SIZE);
   const cellY = Math.floor(player.y / ENEMY_CELL_SIZE);
@@ -6926,8 +6954,11 @@ function resolvePlayerEnemyDamage(dt, grid) {
         const damage = enemy.touchDamage * dt;
         incomingDamage += damage;
         byType[enemy.type] = Number(((byType[enemy.type] ?? 0) + damage).toFixed(2));
-        enemy.x -= (dx / distance) * Math.min(6, overlap);
-        enemy.y -= (dy / distance) * Math.min(6, overlap);
+        if (pushes < pushBudgetMax) {
+          enemy.x -= (dx / distance) * Math.min(6, overlap);
+          enemy.y -= (dy / distance) * Math.min(6, overlap);
+          pushes += 1;
+        }
       }
     }
   }
