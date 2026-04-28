@@ -2045,7 +2045,7 @@ function onTouchPointerEnd(event) {
 }
 
 function isDevToggleEvent(event) {
-  return event.code === "Slash";
+  return event.code === "F2";
 }
 
 function isDashEvent(event) {

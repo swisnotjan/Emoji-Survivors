@@ -1430,31 +1430,28 @@ function drawEffects(layer = "base") {
       const envelope = getEffectEnvelope(effect, lifeRatio);
       const radius = (effect.radius ?? 120) * lerp(0.94, 1.02, envelope.enter);
       const palette = getEffectPalette(effect);
-      fillGradientDisc(
-        pos.x,
-        pos.y,
-        radius,
-        [
-          [0, palette.light(0.012 + envelope.alpha * 0.03)],
-          [0.48, palette.primary(0.02 + envelope.alpha * 0.06)],
-          [0.82, palette.tertiary(0.035 + envelope.alpha * 0.08)],
-          [1, palette.secondary(0)],
-        ],
-        "screen"
-      );
-      fillGradientRing(
-        pos.x,
-        pos.y,
-        radius * 0.6,
-        radius * 0.98,
-        [
-          [0, palette.secondary(0)],
-          [0.42, palette.secondary(0.02 + envelope.alpha * 0.07)],
-          [0.68, palette.tertiary(0.04 + envelope.alpha * 0.1)],
-          [1, palette.secondary(0)],
-        ],
-        "screen"
-      );
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      ctx.fillStyle = buildRadialGradient(pos.x, pos.y, 0, radius, [
+        [0, palette.light(0.012 + envelope.alpha * 0.03)],
+        [0.48, palette.primary(0.02 + envelope.alpha * 0.06)],
+        [0.82, palette.tertiary(0.035 + envelope.alpha * 0.08)],
+        [1, palette.secondary(0)],
+      ]);
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2); ctx.fill();
+      const buffRingInner = radius * 0.6;
+      const buffRingOuter = radius * 0.98;
+      ctx.fillStyle = buildRadialGradient(pos.x, pos.y, buffRingInner, buffRingOuter, [
+        [0, palette.secondary(0)],
+        [0.42, palette.secondary(0.02 + envelope.alpha * 0.07)],
+        [0.68, palette.tertiary(0.04 + envelope.alpha * 0.1)],
+        [1, palette.secondary(0)],
+      ]);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, buffRingOuter, 0, Math.PI * 2);
+      ctx.arc(pos.x, pos.y, buffRingInner, 0, Math.PI * 2, true);
+      ctx.fill("evenodd");
+      ctx.restore();
       const runeCount = fxTier >= 2 ? 0 : fxTier >= 1 ? 4 : 8;
       if (runeCount > 0) {
         const runeMidColor = palette.light(0.06 + envelope.alpha * 0.1);
@@ -1493,42 +1490,38 @@ function drawEffects(layer = "base") {
       const secondary = effect.secondaryColor ?? effect.color;
       const profile = getSoftEffectProfile(effect.kind);
       envelope.alpha = Math.min(2.26, envelope.alpha * (profile.opacityBoost ?? 2.06));
-      fillGradientDisc(
-        pos.x,
-        pos.y,
-        radius * profile.discScale,
-        [
-          [0, palette.dark((0.06 + envelope.alpha * 0.06) * profile.baseAlpha)],
-          [0.18, palette.primary((0.1 + envelope.alpha * 0.12) * profile.baseAlpha)],
-          [0.54, palette.tertiary((0.12 + envelope.alpha * 0.14) * profile.baseAlpha)],
-          [1, palette.secondary(0)],
-        ]
-      );
-      fillGradientRing(
-        pos.x,
-        pos.y,
-        radius * profile.ringInnerScale,
-        radius * profile.ringOuterScale,
-        [
-          [0, palette.secondary(0)],
-          [0.28, palette.secondary((0.08 + envelope.alpha * 0.12) * profile.ringAlpha)],
-          [0.58, palette.tertiary((0.12 + envelope.alpha * 0.18) * profile.ringAlpha)],
-          [0.84, palette.secondary((0.08 + envelope.alpha * 0.12) * profile.ringAlpha)],
-          [1, palette.secondary(0)],
-        ],
-        "screen"
-      );
-      fillGradientDisc(
-        pos.x,
-        pos.y,
-        radius * profile.coreScale,
-        [
-          [0, palette.light((0.08 + envelope.alpha * 0.08) * profile.coreAlpha)],
-          [0.54, palette.primary((0.12 + envelope.alpha * 0.1) * profile.coreAlpha)],
-          [1, palette.secondary(0)],
-        ],
-        "screen"
-      );
+      // Batch disc + ring + core under one save/restore; switch composite once
+      ctx.save();
+      const discR = radius * profile.discScale;
+      ctx.fillStyle = buildRadialGradient(pos.x, pos.y, 0, discR, [
+        [0, palette.dark((0.06 + envelope.alpha * 0.06) * profile.baseAlpha)],
+        [0.18, palette.primary((0.1 + envelope.alpha * 0.12) * profile.baseAlpha)],
+        [0.54, palette.tertiary((0.12 + envelope.alpha * 0.14) * profile.baseAlpha)],
+        [1, palette.secondary(0)],
+      ]);
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, discR, 0, Math.PI * 2); ctx.fill();
+      ctx.globalCompositeOperation = "screen";
+      const ringInnerR = radius * profile.ringInnerScale;
+      const ringOuterR = radius * profile.ringOuterScale;
+      ctx.fillStyle = buildRadialGradient(pos.x, pos.y, ringInnerR, ringOuterR, [
+        [0, palette.secondary(0)],
+        [0.28, palette.secondary((0.08 + envelope.alpha * 0.12) * profile.ringAlpha)],
+        [0.58, palette.tertiary((0.12 + envelope.alpha * 0.18) * profile.ringAlpha)],
+        [0.84, palette.secondary((0.08 + envelope.alpha * 0.12) * profile.ringAlpha)],
+        [1, palette.secondary(0)],
+      ]);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, ringOuterR, 0, Math.PI * 2);
+      ctx.arc(pos.x, pos.y, ringInnerR, 0, Math.PI * 2, true);
+      ctx.fill("evenodd");
+      const coreR = radius * profile.coreScale;
+      ctx.fillStyle = buildRadialGradient(pos.x, pos.y, 0, coreR, [
+        [0, palette.light((0.08 + envelope.alpha * 0.08) * profile.coreAlpha)],
+        [0.54, palette.primary((0.12 + envelope.alpha * 0.1) * profile.coreAlpha)],
+        [1, palette.secondary(0)],
+      ]);
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, coreR, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
 
       if (fxTier < 2) {
         const moteCount = effect.kind === "tempest-node" || effect.kind === "ash-comet" || effect.kind === "grave-call" ? 6 : 4;
@@ -1548,18 +1541,18 @@ function drawEffects(layer = "base") {
       }
 
       if (effect.kind === "gale-ring") {
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
         for (let i = 0; i < 3; i += 1) {
           const arcRadius = radius * (0.54 + i * 0.12);
           const start = effect.seed + state.elapsed * (0.9 + i * 0.22) + i * 1.6;
-          const end = start + 0.9;
-          withComposite("screen", () => {
-            ctx.strokeStyle = i === 0 ? palette.secondary(0.035 + envelope.alpha * 0.09) : palette.tertiary(0.03 + envelope.alpha * 0.07);
-            ctx.lineWidth = 7 - i * 1.3;
-            ctx.beginPath();
-            ctx.arc(pos.x, pos.y, arcRadius, start, end);
-            ctx.stroke();
-          });
+          ctx.strokeStyle = i === 0 ? palette.secondary(0.035 + envelope.alpha * 0.09) : palette.tertiary(0.03 + envelope.alpha * 0.07);
+          ctx.lineWidth = 7 - i * 1.3;
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, arcRadius, start, start + 0.9);
+          ctx.stroke();
         }
+        ctx.restore();
         for (let i = 0; i < 8; i += 1) {
           const angle = effect.seed + state.elapsed * 2.6 + i * (Math.PI * 2 / 8);
           const sparkRadius = radius * (0.34 + (i % 3) * 0.11);
@@ -2428,12 +2421,11 @@ function drawEnemies() {
 
     if (visualHeight > 0) {
       const squash = 1 + Math.min(0.3, visualHeight / 240);
-      ctx.save();
       ctx.fillStyle = "rgba(9, 13, 11, 0.26)";
       ctx.beginPath();
       ctx.ellipse(pos.x, pos.y + enemy.radius * 0.48, enemy.radius * (0.8 + squash * 0.2), enemy.radius * 0.34, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.restore();
+      ctx.fillStyle = "#ffffff";
     }
 
     if (perfTier === 0 && enemy.isBoss && enemy.phase >= 2) {
@@ -2460,12 +2452,10 @@ function drawEnemies() {
 
     if (status) {
       const auraStrength = clamp(status.value, 0.18, 0.95);
-      ctx.save();
       ctx.fillStyle = tintAlpha(status.aura, 0.12 + auraStrength * 0.18);
       ctx.beginPath();
       ctx.arc(drawX, drawY, enemy.radius + 8 + auraStrength * 4, 0, Math.PI * 2);
       ctx.fill();
-      ctx.restore();
 
       ctx.save();
       const hueRotate = status.key === "wind" ? 0 : status.hue;

@@ -9,9 +9,8 @@ function shouldBlockGameplay() {
   const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
   const shortestSide = Math.min(viewportWidth, viewportHeight);
-  const narrowScreen = shortestSide <= 920;
-  const touchCapableMac = platform === "MacIntel" && touchPoints > 1 && shortestSide <= 1024;
-  return uaDataMobile || mobileTabletUa || touchCapableMac || narrowScreen;
+  const narrowScreen = shortestSide <= 600;
+  return uaDataMobile || mobileTabletUa || narrowScreen;
 }
 
 function applyGameplayAccessGate() {
