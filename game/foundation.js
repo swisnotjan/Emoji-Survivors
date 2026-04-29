@@ -162,6 +162,7 @@ const emojiCompatibility = {
   replaceEmoji12: false,
   replaceSequences: false,
   useAtlasSprites: false,
+  skipWindowsGlyphProbe: false,
 };
 const EMOJI_SUPPORT_PROBE_GROUPS = {
   emoji14: ["\uD83E\uDDCC", "\uD83E\uDEC5"],
@@ -270,6 +271,7 @@ async function detectLegacyEmojiCompatibility() {
       normalizeSequences: false,
     });
     emojiCompatibility.useAtlasSprites = false;
+    emojiCompatibility.skipWindowsGlyphProbe = hasReliablePlatformVersion && majorPlatformVersion >= 13;
   } catch {
     // Keep the synchronous user-agent result when high entropy UA-CH is unavailable.
   } finally {
@@ -333,7 +335,7 @@ function detectEmojiGlyphFallbackNeeds() {
     return;
   }
   const ua = navigator.userAgent || "";
-  const shouldProbe = /\bWindows NT 10\.0\b/.test(ua) && !navigator.userAgentData;
+  const shouldProbe = /\bWindows NT 10\.0\b/.test(ua) && !emojiCompatibility.skipWindowsGlyphProbe;
   if (!shouldProbe) {
     return;
   }
