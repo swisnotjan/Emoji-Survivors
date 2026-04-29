@@ -5281,7 +5281,7 @@ function damagePlayer(rawDamage, source = null) {
   }
 
   const player = state.player;
-  if (player.dash.iFramesTimer > 0 || state.dev.playerInvulnerable || state.bossIntro?.active) {
+  if (player.dash.iFramesTimer > 0 || state.dev.playerInvulnerable) {
     return;
   }
 

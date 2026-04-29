@@ -8927,12 +8927,6 @@ function renderStartOverlay() {
     ? `${focusedClassDef.playerEmoji} Start as ${focusedClassDef.title}`
     : `${selectedClassDef.playerEmoji} Start as ${selectedClassDef.title}`;
   updateAudioMixerUI();
-  if (audioMixer) {
-    audioMixer.classList.toggle("hidden", state.running);
-    if (state.running) {
-      audioMixer.classList.remove("is-open");
-    }
-  }
   startOverlay.classList.toggle("hidden", state.running);
 }
 
@@ -8966,11 +8960,6 @@ function startRunImmediate() {
   resetTouchControls();
   state = createInitialState(metaProgress.selectedClassId);
   state.running = true;
-  if (audioMixer) {
-    audioMixer.classList.add("hidden");
-    audioMixer.classList.remove("is-open");
-  }
-  document.body.classList.remove("pause-menu-mode-audio");
   ensurePerformanceRecorderRun();
   initPortal?.();
   startOverlay.classList.add("hidden");
