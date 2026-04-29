@@ -38,6 +38,9 @@ const SOFT_BURST_SPRITE_CACHE = new Map();
 const TERRAIN_CHUNK_CACHE = new Map();
 const TERRAIN_CHUNK_PREWARM_QUEUE = [];
 const TERRAIN_CHUNK_PREWARM_KEYS = new Set();
+// Backward-compatible terrain cache surface used by the current renderer.
+const TERRAIN_CACHE_CANVAS = document.createElement("canvas");
+const TERRAIN_CACHE_CTX = TERRAIN_CACHE_CANVAS.getContext("2d", { alpha: false });
 const GAME_CONFIG = window.GAME_CONFIG ?? {};
 const TERRAIN_PALETTE = GAME_CONFIG.terrainPalette ?? {
   grass: ["#2a472b", "#3e603f", "#4f7950"],
