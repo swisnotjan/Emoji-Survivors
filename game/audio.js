@@ -74,6 +74,7 @@
   let lastMusicTrackIndex = -1;
   let runMusicActive = false;
   let runMusicPaused = false;
+  let runMusicMode = "normal";
   let runMusicDeathProgress = 0;
   let musicStopToken = 0;
   let musicTransitionToken = 0;
@@ -247,6 +248,33 @@
     return true;
   }
 
+  function preloadMusicOnPageLoad() {
+    if (MUSIC_TRACKS.length === 0) {
+      return;
+    }
+    ensureMusicNodes(null);
+    if (musicElement && !musicElement.src) {
+      const preloadIndex = pickNextMusicTrackIndex();
+      const preloadSrc = encodeURI(MUSIC_TRACKS[preloadIndex]);
+      musicElement.src = preloadSrc;
+      currentMusicTrackIndex = preloadIndex;
+      lastMusicTrackIndex = preloadIndex;
+      musicElement.load();
+    }
+    for (const track of MUSIC_TRACKS) {
+      const href = encodeURI(track);
+      const existing = document.querySelector(`link[rel="preload"][as="audio"][href="${href}"]`);
+      if (existing) {
+        continue;
+      }
+      const link = document.createElement("link");
+      link.rel = "preload";
+      link.as = "audio";
+      link.href = href;
+      document.head.appendChild(link);
+    }
+  }
+
   function applyRunMusicState(progress = 0) {
     if (!musicElement) {
       return;
@@ -255,9 +283,10 @@
     const now = ctx ? ctx.currentTime : 0;
     const eased = smoothstep01(progress);
     const baseMusicGain = getEffectiveMusicGain();
-    const gain = Math.max(0.0001, baseMusicGain * lerp(1, 0.04, eased));
-    const cutoff = lerp(18000, 220, eased);
-    const q = lerp(0.6, 2.4, eased);
+    const muffled = runMusicMode === "muffled";
+    const gain = Math.max(0.0001, baseMusicGain * (muffled ? 0.16 : 1) * lerp(1, 0.04, eased));
+    const cutoff = muffled ? Math.min(18000, lerp(460, 280, eased)) : lerp(18000, 220, eased);
+    const q = muffled ? lerp(2.2, 2.9, eased) : lerp(0.6, 2.4, eased);
     const playbackRate = lerp(1, 0.16, eased);
     if (ctx && musicGraphReady && musicGain && musicFilter) {
       musicGain.gain.cancelScheduledValues(now);
@@ -428,18 +457,30 @@
   }
 
   function pauseRunMusic() {
-    if (!musicElement || !runMusicActive || runMusicPaused) {
+    if (!musicElement || !runMusicActive) {
       return;
     }
-    runMusicPaused = true;
-    musicElement.pause();
+    runMusicMode = "muffled";
+    if (runMusicPaused) {
+      runMusicPaused = false;
+    }
+    if (muted || musicMuted || musicVolume <= 0.0001) {
+      return;
+    }
+    ensureContext();
+    ensureMusicNodes(audioCtx);
+    applyRunMusicState(runMusicDeathProgress);
+    musicElement.play().catch(() => {});
   }
 
   function resumeRunMusic() {
-    if (!musicElement || !runMusicActive || !runMusicPaused) {
+    if (!musicElement || !runMusicActive) {
       return;
     }
-    runMusicPaused = false;
+    runMusicMode = "normal";
+    if (runMusicPaused) {
+      runMusicPaused = false;
+    }
     if (muted || musicMuted || musicVolume <= 0.0001) {
       return;
     }
@@ -782,6 +823,7 @@
   }
 
   unlockOnFirstInput();
+  preloadMusicOnPageLoad();
 
   window.sfx = {
     play,

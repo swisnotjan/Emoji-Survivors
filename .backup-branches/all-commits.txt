@@ -1,0 +1,61 @@
+* 59f7b39 Reduce first-contact crowd hitch with pressure-aware separation
+* 0a6e794 Optimize mass XP drop placement to remove first-crowd hitch
+* 5755055 Cap crowd-contact separation work to remove first-contact stutters
+* 9ac268f Eliminate first-wave combat stutters with frame budgets and in-place compaction
+* b7deddb Smooth combat stutters via effect cache warmup and hit-fx throttling
+* 5a42985 Reduce cross-class skill spike load and speed FPS recovery
+* c3c94d6 Fix status aura overlap and throttle skill damage-number load
+* 6ecf3b4 Fix enemy translucency and optimize skill computation hot paths
+* 8b003c2 Harden enemy draw state reset per entity to prevent translucency leaks
+* 71f38ba Fix enemy translucency by resetting canvas state in enemy pass
+* b1917af Fix persistent FPS drops by capping sim catch-up and optimizing AoE zone ticks
+* 2267b7d Fix player aura layering, add telemetry summary, refresh README, remove skill-lab
+* 2146415 perf: batch telegraph/tempest-node/vein-burst composites, cache attack color RGB
+* d0437bc feat: F2 dev menu, lower screen size gate, batch more composite draws
+* bfef989 fix: pre-warm features one region ahead to prevent pop-in; batch effect draw composites
+* 856ba64 perf: cache getCameraState/getPerformanceTier/getFxTier per frame, replace Math.hypot with distanceSq
+* 39b2834 perf: optimize terrain rendering, unlock FPS cap, fix feature pop-in
+* 3b5c424 feat: add Vibe Jam 2026 portal with return portal support
+| *   6877c95 Merge branch 'codex/minor-tweaks-90fps-upgrades'
+| |\  
+| |/  
+|/|   
+* | 5679a63 chore: apply gameplay/ui tweaks and performance instrumentation
+| * 46c4c70 perf: cap world caches and reduce terrain churn
+|/  
+* b736040 perf: replace shadowBlur on telegraphs only, reduce enemy-buff-field runes
+* e5d9bcf Revert "perf: remove all per-frame ctx.shadowBlur, replace with cheap pre-pass glow"
+* 3b8599e perf: remove all per-frame ctx.shadowBlur, replace with cheap pre-pass glow
+* 126d459 perf: AI LOD + spatial separation LOD for endgame enemy counts
+* 9892cea perf: cut enemy cap from 500 to 130, raise min spawn interval
+* 29decff perf: guard expensive canvas ops during boss fights
+* 0b37c0e perf: reduce GC pressure, fix FPS display position, keep UI visible at tier 1
+* 436e1bf balance: full class rework — skills, necro, frost, enemies, spawns
+*   e7716d9 Merge branch 'codex/ui-retro-pixel-refresh'
+|\  
+| * 11bcc8b Retro pixel UI refresh with emoji atlas and render improvements
+* | 07a94a6 Merge branch 'codex/ui-retro-pixel-refresh' into main
+|\| 
+| * 2e817f2 Refine run UI, pause menu flow, minimap and objectives
+| * 9093474 feat: refine retro pixel UI edge style
+| * 6eda61a chore: checkpoint previous game updates
+* | 40b5ad6 chore: checkpoint previous game updates
+|/  
+*   a04620e Merge branch 'codex/archive-challenges'
+|\  
+| * b67ef6f Add archive challenges and tune blood mage
+|/  
+* 0bb25be Fix start screen initialization error
+*   3ba740d Merge branch 'codex/class-rework-phase1'
+|\  
+| * 220e258 Implement class rework phases and dev menu updates
+|/  
+*   aea4267 Merge branch 'codex/boss-balance-pass'
+|\  
+| * c428d97 Rework and rebalance boss encounters
+|/  
+* d4ed558 Reorganize project structure and tooling
+* 13fa1c0 Optimize combat effects and pickup flow
+* d9e1ac6 Fix mojibake UI glyphs
+* 0a870e2 Fix class unlock reconciliation
+* 7340fca Prepare GitHub Pages deployment
