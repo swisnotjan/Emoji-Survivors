@@ -349,64 +349,91 @@ function updateMiniMapObjectives() {
   }
 }
 
-function ensureTerrainRenderCache(zoom, startWorldX, startWorldY, endWorldX, endWorldY) {
-  // Rebuild only when zoom changes or camera moves 4+ tiles — reduces rebuild frequency ~4x
-  const hysteresisWorld = TERRAIN_TILE_SIZE * 4;
-  if (
-    terrainRenderCache.zoom === zoom &&
-    terrainRenderCache.lastRebuildStartX !== null &&
-    Math.abs(startWorldX - terrainRenderCache.lastRebuildStartX) < hysteresisWorld &&
-    Math.abs(startWorldY - terrainRenderCache.lastRebuildStartY) < hysteresisWorld
-  ) {
-    return;
-  }
+function terrainChunkIndex(worldCoord, axisStart) {
+  return Math.floor((worldCoord - axisStart) / TERRAIN_CHUNK_SIZE);
+}
 
+function terrainChunkOrigin(index, axisStart) {
+  return axisStart + index * TERRAIN_CHUNK_SIZE;
+}
+
+function terrainZoomKey(zoom) {
+  return Math.max(1, Math.round(zoom * 1000));
+}
+
+function terrainChunkKey(chunkX, chunkY, zoomKey) {
+  return `${getWorldSeed()}:${zoomKey}:${chunkX},${chunkY}`;
+}
+
+function maxTerrainChunkX() {
+  return Math.max(0, Math.floor((WORLD.right - WORLD.left - 1) / TERRAIN_CHUNK_SIZE));
+}
+
+function maxTerrainChunkY() {
+  return Math.max(0, Math.floor((WORLD.bottom - WORLD.top - 1) / TERRAIN_CHUNK_SIZE));
+}
+
+function pruneTerrainChunkCache() {
+  while (TERRAIN_CHUNK_CACHE.size > TERRAIN_CHUNK_CACHE_MAX_ENTRIES) {
+    let oldestKey = null;
+    let oldestTick = Number.POSITIVE_INFINITY;
+    for (const [key, chunk] of TERRAIN_CHUNK_CACHE) {
+      if ((chunk.lastUsedTick ?? 0) < oldestTick) {
+        oldestTick = chunk.lastUsedTick ?? 0;
+        oldestKey = key;
+      }
+    }
+    if (!oldestKey) {
+      break;
+    }
+    TERRAIN_CHUNK_CACHE.delete(oldestKey);
+    TERRAIN_CHUNK_PREWARM_KEYS.delete(oldestKey);
+  }
+}
+
+function buildTerrainChunk(chunkX, chunkY, zoomKey) {
+  const zoom = zoomKey / 1000;
   const tileSize = TERRAIN_TILE_SIZE;
   const drawSize = Math.ceil(tileSize / zoom) + 1;
-  const tilesWide = Math.floor((endWorldX - startWorldX) / tileSize) + 1;
-  const tilesHigh = Math.floor((endWorldY - startWorldY) / tileSize) + 1;
-  const tilePositionsX = Array.from({ length: tilesWide }, (_, index) =>
-    Math.round((index * tileSize) / zoom)
-  );
-  const tilePositionsY = Array.from({ length: tilesHigh }, (_, index) =>
-    Math.round((index * tileSize) / zoom)
-  );
-  const lastTileX = tilePositionsX[tilePositionsX.length - 1] ?? 0;
-  const lastTileY = tilePositionsY[tilePositionsY.length - 1] ?? 0;
-  const newCacheWidth = Math.max(1, lastTileX + drawSize + 2);
-  const newCacheHeight = Math.max(1, lastTileY + drawSize + 2);
-  // Assigning canvas.width always clears + resets GPU context state — only do it when size actually changes
-  if (TERRAIN_CACHE_CANVAS.width !== newCacheWidth || TERRAIN_CACHE_CANVAS.height !== newCacheHeight) {
-    TERRAIN_CACHE_CANVAS.width = newCacheWidth;
-    TERRAIN_CACHE_CANVAS.height = newCacheHeight;
-  } else {
-    TERRAIN_CACHE_CTX.clearRect(0, 0, newCacheWidth, newCacheHeight);
+  const originX = terrainChunkOrigin(chunkX, WORLD.left);
+  const originY = terrainChunkOrigin(chunkY, WORLD.top);
+  const endX = Math.min(WORLD.right, originX + TERRAIN_CHUNK_SIZE);
+  const endY = Math.min(WORLD.bottom, originY + TERRAIN_CHUNK_SIZE);
+  const width = Math.max(1, Math.ceil((endX - originX) / zoom) + drawSize + 2);
+  const height = Math.max(1, Math.ceil((endY - originY) / zoom) + drawSize + 2);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const chunkCtx = canvas.getContext("2d", { alpha: false });
+  const waterTiles = [];
+  if (!chunkCtx) {
+    return { canvas, originX, originY, width, height, zoom, waterTiles, lastUsedTick: state?.tick ?? 0 };
   }
-  TERRAIN_CACHE_CTX.fillStyle = "#111629";
-  TERRAIN_CACHE_CTX.fillRect(0, 0, newCacheWidth, newCacheHeight);
-  terrainRenderCache.waterTiles = [];
 
-  // Pre-generate feature regions one full region beyond the viewport in each direction,
-  // so drawWorldFeatures never triggers generation for an on-screen region (pop-in)
+  chunkCtx.imageSmoothingEnabled = false;
+  chunkCtx.fillStyle = "#111629";
+  chunkCtx.fillRect(0, 0, width, height);
+
   iterateWorldFeaturesInBounds(
-    startWorldX - WORLD_FEATURE_REGION_SIZE,
-    startWorldY - WORLD_FEATURE_REGION_SIZE,
-    endWorldX + WORLD_FEATURE_REGION_SIZE,
-    endWorldY + WORLD_FEATURE_REGION_SIZE,
+    originX - WORLD_FEATURE_REGION_SIZE,
+    originY - WORLD_FEATURE_REGION_SIZE,
+    endX + WORLD_FEATURE_REGION_SIZE,
+    endY + WORLD_FEATURE_REGION_SIZE,
     () => {}
   );
 
-  for (let tileYIndex = 0, worldY = startWorldY; worldY <= endWorldY; worldY += tileSize, tileYIndex += 1) {
-    const screenY = tilePositionsY[tileYIndex];
-    for (let tileXIndex = 0, worldX = startWorldX; worldX <= endWorldX; worldX += tileSize, tileXIndex += 1) {
-      const screenX = tilePositionsX[tileXIndex];
+  const startTileX = Math.floor(originX / tileSize) * tileSize;
+  const startTileY = Math.floor(originY / tileSize) * tileSize;
+  for (let worldY = startTileY; worldY < endY; worldY += tileSize) {
+    const screenY = Math.round((worldY - originY) / zoom);
+    for (let worldX = startTileX; worldX < endX; worldX += tileSize) {
+      const screenX = Math.round((worldX - originX) / zoom);
       const terrain = getTerrainTileBase(worldX + tileSize * 0.5, worldY + tileSize * 0.5);
-      TERRAIN_CACHE_CTX.fillStyle = terrain.baseFill;
-      TERRAIN_CACHE_CTX.fillRect(screenX, screenY, drawSize, drawSize);
-
+      chunkCtx.fillStyle = terrain.baseFill;
+      chunkCtx.fillRect(screenX, screenY, drawSize, drawSize);
       if (terrain.speckAlpha > 0.03) {
-        TERRAIN_CACHE_CTX.fillStyle = tintAlpha(terrain.speckColor, terrain.speckAlpha);
-        TERRAIN_CACHE_CTX.fillRect(
+        chunkCtx.fillStyle = tintAlpha(terrain.speckColor, terrain.speckAlpha);
+        chunkCtx.fillRect(
           Math.floor(screenX + terrain.speckX / zoom),
           Math.floor(screenY + terrain.speckY / zoom),
           Math.max(1, Math.ceil(terrain.speckSize / zoom)),
@@ -414,20 +441,82 @@ function ensureTerrainRenderCache(zoom, startWorldX, startWorldY, endWorldX, end
         );
       }
       if (terrain.type === "water") {
-        terrainRenderCache.waterTiles.push({ worldX, worldY, screenX, screenY, drawSize });
+        waterTiles.push({ worldX, worldY, screenX, screenY, drawSize });
       }
     }
   }
 
+  return { canvas, originX, originY, width, height, zoom, waterTiles, lastUsedTick: state?.tick ?? 0 };
+}
+
+function getTerrainChunk(chunkX, chunkY, zoomKey) {
+  const key = terrainChunkKey(chunkX, chunkY, zoomKey);
+  let chunk = TERRAIN_CHUNK_CACHE.get(key);
+  if (!chunk) {
+    chunk = buildTerrainChunk(chunkX, chunkY, zoomKey);
+    TERRAIN_CHUNK_CACHE.set(key, chunk);
+    TERRAIN_CHUNK_PREWARM_KEYS.delete(key);
+    pruneTerrainChunkCache();
+  }
+  chunk.lastUsedTick = state?.tick ?? 0;
+  return chunk;
+}
+
+function enqueueTerrainChunkPrewarm(chunkX, chunkY, zoomKey) {
+  const key = terrainChunkKey(chunkX, chunkY, zoomKey);
+  if (TERRAIN_CHUNK_CACHE.has(key) || TERRAIN_CHUNK_PREWARM_KEYS.has(key)) {
+    return;
+  }
+  TERRAIN_CHUNK_PREWARM_KEYS.add(key);
+  TERRAIN_CHUNK_PREWARM_QUEUE.push({ chunkX, chunkY, zoomKey, key });
+}
+
+function processTerrainChunkPrewarmQueue() {
+  const budget = getPerformanceTier() >= 2 ? 0 : 1;
+  for (let count = 0; count < budget && TERRAIN_CHUNK_PREWARM_QUEUE.length > 0; count += 1) {
+    const task = TERRAIN_CHUNK_PREWARM_QUEUE.shift();
+    TERRAIN_CHUNK_PREWARM_KEYS.delete(task.key);
+    if (!TERRAIN_CHUNK_CACHE.has(task.key)) {
+      TERRAIN_CHUNK_CACHE.set(task.key, buildTerrainChunk(task.chunkX, task.chunkY, task.zoomKey));
+    }
+  }
+  pruneTerrainChunkCache();
+}
+
+function collectVisibleTerrainChunks(startWorldX, startWorldY, endWorldX, endWorldY, zoom) {
+  const zoomKey = terrainZoomKey(zoom);
+  const maxChunkX = maxTerrainChunkX();
+  const maxChunkY = maxTerrainChunkY();
+  const startChunkX = clamp(terrainChunkIndex(startWorldX, WORLD.left), 0, maxChunkX);
+  const startChunkY = clamp(terrainChunkIndex(startWorldY, WORLD.top), 0, maxChunkY);
+  const endChunkX = clamp(Math.max(startChunkX, terrainChunkIndex(endWorldX, WORLD.left)), 0, maxChunkX);
+  const endChunkY = clamp(Math.max(startChunkY, terrainChunkIndex(endWorldY, WORLD.top)), 0, maxChunkY);
+  const chunks = [];
+  for (let chunkY = startChunkY; chunkY <= endChunkY; chunkY += 1) {
+    for (let chunkX = startChunkX; chunkX <= endChunkX; chunkX += 1) {
+      chunks.push(getTerrainChunk(chunkX, chunkY, zoomKey));
+    }
+  }
+  for (let chunkY = startChunkY - 1; chunkY <= endChunkY + 1; chunkY += 1) {
+    for (let chunkX = startChunkX - 1; chunkX <= endChunkX + 1; chunkX += 1) {
+      if (chunkX < 0 || chunkY < 0 || chunkX > maxChunkX || chunkY > maxChunkY) {
+        continue;
+      }
+      if (chunkX >= startChunkX && chunkX <= endChunkX && chunkY >= startChunkY && chunkY <= endChunkY) {
+        continue;
+      }
+      enqueueTerrainChunkPrewarm(chunkX, chunkY, zoomKey);
+    }
+  }
+  processTerrainChunkPrewarmQueue();
   terrainRenderCache.zoom = zoom;
   terrainRenderCache.startWorldX = startWorldX;
   terrainRenderCache.startWorldY = startWorldY;
   terrainRenderCache.endWorldX = endWorldX;
   terrainRenderCache.endWorldY = endWorldY;
-  terrainRenderCache.lastRebuildStartX = startWorldX;
-  terrainRenderCache.lastRebuildStartY = startWorldY;
+  terrainRenderCache.visibleChunks = chunks;
+  return chunks;
 }
-
 function drawBackground() {
   ctx.clearRect(0, 0, viewWidth, viewHeight);
   ctx.fillStyle = "#000000";
@@ -456,24 +545,32 @@ function drawBackground() {
   const startWorldY = Math.floor((camera.worldY - halfWorldViewHeight) / tileSize) * tileSize - renderPadding;
   const endWorldX = Math.ceil((camera.worldX + halfWorldViewWidth) / tileSize) * tileSize + renderPadding;
   const endWorldY = Math.ceil((camera.worldY + halfWorldViewHeight) / tileSize) * tileSize + renderPadding;
-  ensureTerrainRenderCache(zoom, startWorldX, startWorldY, endWorldX, endWorldY);
-  // Use stored cache origin (not current-frame startWorldX) so canvas stays aligned between rebuilds
-  const terrainOrigin = worldToScreen(terrainRenderCache.startWorldX, terrainRenderCache.startWorldY);
-  const terrainOriginX = Math.floor(terrainOrigin.x);
-  const terrainOriginY = Math.floor(terrainOrigin.y);
-  ctx.drawImage(TERRAIN_CACHE_CANVAS, terrainOriginX, terrainOriginY);
-  for (const tile of terrainRenderCache.waterTiles) {
-    const terrain = sampleTerrainTile(tile.worldX + tileSize * 0.5, tile.worldY + tileSize * 0.5);
-    ctx.fillStyle = terrain.fill;
-    ctx.fillRect(terrainOriginX + tile.screenX, terrainOriginY + tile.screenY, tile.drawSize, tile.drawSize);
-    if (terrain.speckAlpha > 0.03) {
-      ctx.fillStyle = tintAlpha(terrain.speckColor, terrain.speckAlpha);
-      ctx.fillRect(
-        Math.floor(terrainOriginX + tile.screenX + terrain.speckX / zoom),
-        Math.floor(terrainOriginY + tile.screenY + terrain.speckY / zoom),
-        Math.max(1, Math.ceil(terrain.speckSize / zoom)),
-        Math.max(1, Math.ceil(terrain.speckSize / zoom))
-      );
+  const terrainChunks = collectVisibleTerrainChunks(startWorldX, startWorldY, endWorldX, endWorldY, zoom);
+  ctx.imageSmoothingEnabled = false;
+  for (const chunk of terrainChunks) {
+    const chunkOrigin = worldToScreen(chunk.originX, chunk.originY);
+    const chunkOriginX = Math.floor(chunkOrigin.x);
+    const chunkOriginY = Math.floor(chunkOrigin.y);
+    const chunkScale = (chunk.zoom ?? zoom) / zoom;
+    const chunkWidth = Math.ceil(chunk.width * chunkScale) + 1;
+    const chunkHeight = Math.ceil(chunk.height * chunkScale) + 1;
+    ctx.drawImage(chunk.canvas, chunkOriginX, chunkOriginY, chunkWidth, chunkHeight);
+    for (const tile of chunk.waterTiles) {
+      const terrain = sampleTerrainTile(tile.worldX + tileSize * 0.5, tile.worldY + tileSize * 0.5);
+      ctx.fillStyle = terrain.fill;
+      const tileX = Math.floor(chunkOriginX + tile.screenX * chunkScale);
+      const tileY = Math.floor(chunkOriginY + tile.screenY * chunkScale);
+      const tileSizeScreen = Math.ceil(tile.drawSize * chunkScale) + 1;
+      ctx.fillRect(tileX, tileY, tileSizeScreen, tileSizeScreen);
+      if (terrain.speckAlpha > 0.03) {
+        ctx.fillStyle = tintAlpha(terrain.speckColor, terrain.speckAlpha);
+        ctx.fillRect(
+          Math.floor(tileX + terrain.speckX / zoom),
+          Math.floor(tileY + terrain.speckY / zoom),
+          Math.max(1, Math.ceil(terrain.speckSize / zoom)),
+          Math.max(1, Math.ceil(terrain.speckSize / zoom))
+        );
+      }
     }
   }
 
@@ -574,8 +671,9 @@ function drawTreeFeature(feature) {
     return;
   }
   const perfTier = getPerformanceTier();
-  const treeEmoji = feature.treeEmoji ?? "🌲";
-  if (drawEmojiSprite(treeEmoji, pos.x, pos.y - treeSize * 0.16, treeSize, {
+  const treeRawEmoji = feature.treeEmoji ?? "🌲";
+  const treeEmoji = getDisplayEmoji(treeRawEmoji);
+  if (drawEmojiSprite(treeRawEmoji, pos.x, pos.y - treeSize * 0.16, treeSize, {
     shadowBlur: perfTier <= 1 ? 14 : 0,
     shadowColor: "rgba(20, 30, 22, 0.34)",
   })) {
@@ -615,8 +713,10 @@ function drawCandleFeature(feature) {
   ctx.textBaseline = "middle";
   ctx.font = `${Math.round(size)}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
   ctx.globalAlpha = 0.96;
-  if (!drawEmojiSprite("🕯️", pos.x, pos.y, size, { alpha: 0.96 })) {
-    ctx.fillText("🕯️", pos.x, pos.y);
+  const candleRawEmoji = "🕯️";
+  const candleEmoji = getDisplayEmoji(candleRawEmoji);
+  if (!drawEmojiSprite(candleRawEmoji, pos.x, pos.y, size, { alpha: 0.96 })) {
+    ctx.fillText(candleEmoji, pos.x, pos.y);
   }
   ctx.restore();
 }
@@ -1545,7 +1645,8 @@ function drawEffects(layer = "base") {
       if (effect.kind === "gale-ring") {
         ctx.save();
         ctx.globalCompositeOperation = "screen";
-        for (let i = 0; i < 3; i += 1) {
+        const arcCount = fxTier >= 2 ? 2 : 3;
+        for (let i = 0; i < arcCount; i += 1) {
           const arcRadius = radius * (0.54 + i * 0.12);
           const start = effect.seed + state.elapsed * (0.9 + i * 0.22) + i * 1.6;
           ctx.strokeStyle = i === 0 ? palette.secondary(0.035 + envelope.alpha * 0.09) : palette.tertiary(0.03 + envelope.alpha * 0.07);
@@ -1555,8 +1656,9 @@ function drawEffects(layer = "base") {
           ctx.stroke();
         }
         ctx.restore();
-        for (let i = 0; i < 8; i += 1) {
-          const angle = effect.seed + state.elapsed * 2.6 + i * (Math.PI * 2 / 8);
+        const sparkCount = fxTier >= 2 ? 4 : 8;
+        for (let i = 0; i < sparkCount; i += 1) {
+          const angle = effect.seed + state.elapsed * 2.6 + i * (Math.PI * 2 / sparkCount);
           const sparkRadius = radius * (0.34 + (i % 3) * 0.11);
           ctx.fillStyle = tintAlpha(i % 2 === 0 ? primary : secondary, 0.04 + envelope.alpha * 0.12);
           ctx.beginPath();
@@ -2188,6 +2290,34 @@ function drawEffects(layer = "base") {
       continue;
     }
 
+    if (effect.kind === "necro-grave") {
+      const alpha = easeOutQuad(lifeRatio);
+      const rise = (1 - lifeRatio) * 10;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.globalCompositeOperation = "screen";
+      drawSoftBurstParticle(
+        pos.x,
+        pos.y + 7 - rise,
+        18,
+        `rgba(170, 239, 202, ${(0.12 * alpha).toFixed(3)})`,
+        "rgba(66, 176, 120, 0)",
+        "screen"
+      );
+      ctx.globalCompositeOperation = "source-over";
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = `rgba(66, 176, 120, ${(0.45 * alpha).toFixed(3)})`;
+      const graveRawEmoji = "🪦";
+      const graveEmoji = getDisplayEmoji(graveRawEmoji);
+      if (!drawEmojiSprite(graveRawEmoji, pos.x, pos.y - 7 - rise, effect.size, { alpha })) {
+        ctx.font = `${Math.round(effect.size)}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(graveEmoji, pos.x, pos.y - 7 - rise);
+      }
+      ctx.restore();
+      continue;
+    }
     if (effect.kind === "holy-text") {
       ctx.save();
       ctx.globalCompositeOperation = "source-over";
@@ -2463,6 +2593,8 @@ function drawEnemies() {
     }
 
     const status = perfTier >= 2 ? null : getEnemyPrimaryStatus(enemy);
+    const enemyRawEmoji = enemy.emoji;
+    const enemyEmoji = getDisplayEmoji(enemyRawEmoji);
 
     if (status) {
       const auraStrength = clamp(status.value, 0.18, 0.95);
@@ -2489,12 +2621,12 @@ function drawEnemies() {
       if (jumpScale !== 1) {
         ctx.translate(drawX, drawY + 1);
         ctx.scale(jumpScale, jumpScale);
-        if (!drawEmojiSprite(enemy.emoji, 0, 0, enemyEmojiSize)) {
-          ctx.fillText(enemy.emoji, 0, 0);
+        if (!drawEmojiSprite(enemyRawEmoji, 0, 0, enemyEmojiSize)) {
+          ctx.fillText(enemyEmoji, 0, 0);
         }
       } else {
-        if (!drawEmojiSprite(enemy.emoji, drawX, drawY + 1, enemyEmojiSize)) {
-          ctx.fillText(enemy.emoji, drawX, drawY + 1);
+        if (!drawEmojiSprite(enemyRawEmoji, drawX, drawY + 1, enemyEmojiSize)) {
+          ctx.fillText(enemyEmoji, drawX, drawY + 1);
         }
       }
       ctx.restore();
@@ -2507,12 +2639,12 @@ function drawEnemies() {
         if (jumpScale !== 1) {
           ctx.translate(drawX, drawY + 1);
           ctx.scale(jumpScale, jumpScale);
-          if (!drawEmojiSprite(enemy.emoji, 0, 0, enemyEmojiSize)) {
-            ctx.fillText(enemy.emoji, 0, 0);
+          if (!drawEmojiSprite(enemyRawEmoji, 0, 0, enemyEmojiSize)) {
+            ctx.fillText(enemyEmoji, 0, 0);
           }
         } else {
-          if (!drawEmojiSprite(enemy.emoji, drawX, drawY + 1, enemyEmojiSize)) {
-            ctx.fillText(enemy.emoji, drawX, drawY + 1);
+          if (!drawEmojiSprite(enemyRawEmoji, drawX, drawY + 1, enemyEmojiSize)) {
+            ctx.fillText(enemyEmoji, drawX, drawY + 1);
           }
         }
         ctx.restore();
@@ -2521,13 +2653,13 @@ function drawEnemies() {
           ctx.save();
           ctx.translate(drawX, drawY + 1);
           ctx.scale(jumpScale, jumpScale);
-          if (!drawEmojiSprite(enemy.emoji, 0, 0, enemyEmojiSize)) {
-            ctx.fillText(enemy.emoji, 0, 0);
+          if (!drawEmojiSprite(enemyRawEmoji, 0, 0, enemyEmojiSize)) {
+            ctx.fillText(enemyEmoji, 0, 0);
           }
           ctx.restore();
         } else {
-          if (!drawEmojiSprite(enemy.emoji, drawX, drawY + 1, enemyEmojiSize)) {
-            ctx.fillText(enemy.emoji, drawX, drawY + 1);
+          if (!drawEmojiSprite(enemyRawEmoji, drawX, drawY + 1, enemyEmojiSize)) {
+            ctx.fillText(enemyEmoji, drawX, drawY + 1);
           }
         }
       }
@@ -2544,7 +2676,7 @@ function drawEnemies() {
       ctx.restore();
     }
 
-    if (perfTier >= 2 || enemy.isBoss || enemy.hp >= enemy.maxHp - 0.01) {
+    if (perfTier >= 2 || enemy.isBoss || (enemy.hp >= enemy.maxHp - 0.01 && (enemy.healthBarVisibleUntil ?? 0) <= state.elapsed)) {
       continue;
     }
 
@@ -2579,18 +2711,20 @@ function drawAllies() {
       continue;
     }
     const alpha = clamp(ally.life / ally.maxLife, 0.3, 1);
+    const allyRawEmoji = ally.emoji;
+    const allyEmoji = getDisplayEmoji(allyRawEmoji);
     const tint = ally.tint ?? "rgba(220, 203, 255, {a})";
     const shadowTint = ally.shadowTint ?? "rgba(195, 151, 255, {a})";
     ctx.save();
     ctx.fillStyle = tint.replace("{a}", alpha.toFixed(3));
     ctx.shadowBlur = 12;
     ctx.shadowColor = shadowTint.replace("{a}", (0.35 + alpha * 0.2).toFixed(3));
-    if (!drawEmojiSprite(ally.emoji, pos.x, pos.y, 28, {
+    if (!drawEmojiSprite(allyRawEmoji, pos.x, pos.y, 28, {
       alpha,
       shadowBlur: 12,
       shadowColor: shadowTint.replace("{a}", (0.35 + alpha * 0.2).toFixed(3)),
     })) {
-      ctx.fillText(ally.emoji, pos.x, pos.y);
+      ctx.fillText(allyEmoji, pos.x, pos.y);
     }
     ctx.restore();
   }
@@ -2642,11 +2776,13 @@ function drawPlayer() {
     ctx.shadowBlur = 18;
     ctx.shadowColor = "rgba(255, 223, 138, 0.35)";
   }
-  if (!drawEmojiSprite(state.player.emoji, 0, 0, 44, {
+  const playerRawEmoji = state.player.emoji;
+  const playerEmoji = getDisplayEmoji(playerRawEmoji);
+  if (!drawEmojiSprite(playerRawEmoji, 0, 0, 44, {
     shadowBlur: perfTier < 2 ? 18 : 0,
     shadowColor: "rgba(255, 223, 138, 0.35)",
   })) {
-    ctx.fillText(state.player.emoji, 0, 0);
+    ctx.fillText(playerEmoji, 0, 0);
   }
   ctx.restore();
   ctx.shadowBlur = 0;
@@ -4580,6 +4716,43 @@ function pushParticleBurst(x, y, color, particles, options = {}) {
   });
 }
 
+function acquireFxParticle() {
+  return state.performance?.particlePool?.pop() ?? {};
+}
+
+function acquireFxEffect() {
+  const effect = state.performance?.effectPool?.pop() ?? {};
+  for (const key of Object.keys(effect)) {
+    delete effect[key];
+  }
+  return effect;
+}
+
+function buildRingEffect(x, y, life, size, growth, lineWidth, color) {
+  const effect = acquireFxEffect();
+  effect.kind = "ring";
+  effect.x = x;
+  effect.y = y;
+  effect.life = life;
+  effect.maxLife = life;
+  effect.size = size;
+  effect.growth = growth;
+  effect.lineWidth = lineWidth;
+  effect.color = color;
+  return effect;
+}
+
+function resetFxParticle(particle, x, y, vx, vy, life, size) {
+  particle.x = x;
+  particle.y = y;
+  particle.vx = vx;
+  particle.vy = vy;
+  particle.life = life;
+  particle.maxLife = life;
+  particle.size = size;
+  return particle;
+}
+
 function spawnCastEffect(x, y, dirX, dirY) {
   const classDef = getClassDef();
   const color = parseColorComponents(classDef.color);
@@ -4643,59 +4816,39 @@ function spawnXpPickupEffect(x, y, scale = 1) {
 }
 
 function spawnPickupCollectEffect(x, y, palette, scale = 1) {
-  pushEffect({
-    kind: "ring",
-    x,
-    y,
-    life: 0.28,
-    maxLife: 0.28,
-    size: 8 * scale,
-    growth: 26 * scale,
-    lineWidth: 3 * Math.sqrt(scale),
-    color: palette.ringColor,
-  });
+  pushEffect(buildRingEffect(x, y, 0.28, 8 * scale, 26 * scale, 3 * Math.sqrt(scale), palette.ringColor));
 
   const particles = [];
   for (let i = 0; i < scaleFxCount(Math.round(6 * Math.max(1, scale))); i += 1) {
     const angle = (i / 6) * Math.PI * 2 + randRange(-0.16, 0.16);
     const speed = randRange(52, 120);
     const life = randRange(0.18, 0.32);
-    particles.push({
+    particles.push(resetFxParticle(
+      acquireFxParticle(),
       x,
       y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed - 18,
+      Math.cos(angle) * speed,
+      Math.sin(angle) * speed - 18,
       life,
-      maxLife: life,
-      size: randRange(2.6, 4.2) * Math.min(1.35, Math.sqrt(scale)),
-    });
+      randRange(2.6, 4.2) * Math.min(1.35, Math.sqrt(scale))
+    ));
   }
 
   for (let i = 0; i < scaleFxCount(Math.round(4 * Math.max(1, scale))); i += 1) {
     const life = randRange(0.28, 0.44);
-    particles.push({
-      x: x + randRange(-5, 5),
-      y: y - randRange(2, 10),
-      vx: randRange(-20, 20),
-      vy: -randRange(70, 125),
+    particles.push(resetFxParticle(
+      acquireFxParticle(),
+      x + randRange(-5, 5),
+      y - randRange(2, 10),
+      randRange(-20, 20),
+      -randRange(70, 125),
       life,
-      maxLife: life,
-      size: randRange(3.4, 5.2) * Math.min(1.35, Math.sqrt(scale)),
-    });
+      randRange(3.4, 5.2) * Math.min(1.35, Math.sqrt(scale))
+    ));
   }
   pushParticleBurst(x, y, palette.sparkColor, particles);
 
-  pushEffect({
-    kind: "ring",
-    x,
-    y,
-    life: 0.2,
-    maxLife: 0.2,
-    size: 4 * scale,
-    growth: 14 * scale,
-    lineWidth: 2.4 * Math.sqrt(scale),
-    color: palette.lineColor,
-  });
+  pushEffect(buildRingEffect(x, y, 0.2, 4 * scale, 14 * scale, 2.4 * Math.sqrt(scale), palette.lineColor));
 }
 
 function spawnPickupSpawnEffect(x, y, type) {
@@ -4703,31 +4856,21 @@ function spawnPickupSpawnEffect(x, y, type) {
   const ringColor = isXp ? "rgba(255, 223, 104, {a})" : "rgba(124, 255, 183, {a})";
   const glowColor = isXp ? "rgba(255, 239, 178, {a})" : "rgba(200, 255, 221, {a})";
 
-  pushEffect({
-    kind: "ring",
-    x,
-    y,
-    life: 0.24,
-    maxLife: 0.24,
-    size: 3,
-    growth: 18,
-    lineWidth: 2.2,
-    color: ringColor,
-  });
+  pushEffect(buildRingEffect(x, y, 0.24, 3, 18, 2.2, ringColor));
 
   const particles = [];
   for (let i = 0; i < scaleFxCount(5); i += 1) {
     const angle = (i / 5) * Math.PI * 2 + randRange(-0.22, 0.22);
     const life = randRange(0.16, 0.24);
-    particles.push({
+    particles.push(resetFxParticle(
+      acquireFxParticle(),
       x,
       y,
-      vx: Math.cos(angle) * randRange(18, 54),
-      vy: Math.sin(angle) * randRange(18, 54) - 12,
+      Math.cos(angle) * randRange(18, 54),
+      Math.sin(angle) * randRange(18, 54) - 12,
       life,
-      maxLife: life,
-      size: randRange(2, 3.2),
-    });
+      randRange(2, 3.2)
+    ));
   }
   pushParticleBurst(x, y, glowColor, particles);
 }
@@ -4918,32 +5061,22 @@ function spawnHitEffect(x, y, palette, dirX, dirY) {
         ? "rgba(255, 239, 168, {a})"
         : "rgba(255, 211, 116, {a})";
 
-  pushEffect({
-    kind: "ring",
-    x,
-    y,
-    life: 0.2,
-    maxLife: 0.2,
-    size: 4,
-    growth: 17,
-    lineWidth: 2.6,
-    color,
-  });
+  pushEffect(buildRingEffect(x, y, 0.2, 4, 17, 2.6, color));
 
   const particles = [];
   for (let i = 0; i < scaleFxCount(4); i += 1) {
     const spreadX = dirX * randRange(40, 120) + randRange(-90, 90);
     const spreadY = dirY * randRange(40, 120) + randRange(-90, 90);
     const life = randRange(0.14, 0.26);
-    particles.push({
-      x: x + randRange(-3, 3),
-      y: y + randRange(-3, 3),
-      vx: spreadX,
-      vy: spreadY,
+    particles.push(resetFxParticle(
+      acquireFxParticle(),
+      x + randRange(-3, 3),
+      y + randRange(-3, 3),
+      spreadX,
+      spreadY,
       life,
-      maxLife: life,
-      size: randRange(2.4, 4.8),
-    });
+      randRange(2.4, 4.8)
+    ));
   }
   pushParticleBurst(x, y, color, particles);
 }
@@ -4970,32 +5103,22 @@ function spawnDefeatEffect(enemy) {
   };
   const color = colorByType[enemy.type] ?? "rgba(255, 219, 148, {a})";
 
-  pushEffect({
-    kind: "ring",
-    x: enemy.x,
-    y: enemy.y,
-    life: 0.34,
-    maxLife: 0.34,
-    size: enemy.radius * 0.5,
-    growth: enemy.radius + 12,
-    lineWidth: 3,
-    color,
-  });
+  pushEffect(buildRingEffect(enemy.x, enemy.y, 0.34, enemy.radius * 0.5, enemy.radius + 12, 3, color));
 
   const particles = [];
   for (let i = 0; i < scaleFxCount(6); i += 1) {
     const angle = (i / 6) * Math.PI * 2 + randRange(-0.28, 0.28);
     const speed = randRange(70, 160);
     const life = randRange(0.26, 0.4);
-    particles.push({
-      x: enemy.x,
-      y: enemy.y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
+    particles.push(resetFxParticle(
+      acquireFxParticle(),
+      enemy.x,
+      enemy.y,
+      Math.cos(angle) * speed,
+      Math.sin(angle) * speed,
       life,
-      maxLife: life,
-      size: randRange(2.6, 5.8),
-    });
+      randRange(2.6, 5.8)
+    ));
   }
   pushParticleBurst(enemy.x, enemy.y, color, particles);
 }

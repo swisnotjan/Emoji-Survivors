@@ -283,6 +283,39 @@ function createInitialState(classId = "wind") {
       fpsTimer: 0,
       tier: 0,
       renderScaleTarget: 1,
+      massSkillQueue: [],
+      massSkillFrameBudget: {
+        tick: -1,
+        remaining: 0,
+      },
+      massXpDropBudget: {
+        tick: -1,
+        drops: 0,
+        pendingXp: 0,
+        pendingX: 0,
+        pendingY: 0,
+      },
+      massSkillQueryCache: {
+        tick: -1,
+        values: new Map(),
+      },
+      damageNumberPool: [],
+      particlePool: [],
+      effectPool: [],
+      deathFxFrameBudget: {
+        tick: -1,
+        count: 0,
+      },
+      skillPerfCounters: {
+        tick: -1,
+        skillQueryMs: 0,
+        skillApplyMs: 0,
+        deathSideEffectsMs: 0,
+        xpDropMs: 0,
+        queuedHits: 0,
+        appliedHits: 0,
+        visualMarkers: 0,
+      },
       profiler: {
         enabled: false,
         refreshTimer: 0,
@@ -1467,6 +1500,26 @@ function isSkillSoundSource(source) {
     sourceName === "holy-wave";
 }
 
+function isMassSkillEffectKind(kind) {
+  return kind === "gale-ring" ||
+    kind === "crosswind-strip" ||
+    kind === "tempest-node" ||
+    kind === "blizzard-wake" ||
+    kind === "permafrost-seal" ||
+    kind === "cinder-halo" ||
+    kind === "sunspot" ||
+    kind === "ash-comet" ||
+    kind === "bone-ward" ||
+    kind === "requiem-field" ||
+    kind === "vein-burst" ||
+    kind === "crimson-pool" ||
+    kind === "holy-wave";
+}
+
+function hasActiveMassSkillEffect() {
+  return state.effects.some((effect) => effect.life > 0 && !effect.inFadeTail && isMassSkillEffectKind(effect.kind));
+}
+
 function bindEvents() {
   document.addEventListener("click", (event) => {
     const button = event.target.closest("button");
@@ -1886,6 +1939,10 @@ function invalidateBackgroundCache() {
   terrainRenderCache.waterTiles = [];
   terrainRenderCache.lastRebuildStartX = null;
   terrainRenderCache.lastRebuildStartY = null;
+  terrainRenderCache.visibleChunks = [];
+  TERRAIN_CHUNK_CACHE.clear();
+  TERRAIN_CHUNK_PREWARM_QUEUE.length = 0;
+  TERRAIN_CHUNK_PREWARM_KEYS.clear();
   // Force drawWorldFeatures to re-collect features on next frame (world seed may have changed)
   worldFeaturesDrawCache.startRX = null;
 }
@@ -2613,13 +2670,17 @@ function getPerformanceProfilerSnapshot() {
 function getPerformanceTier() {
   if (_framePerformanceTier >= 0) return _framePerformanceTier;
   const perf = state.performance;
-  const loadScore =
+  let loadScore =
     state.enemies.length * 1 +
     state.effects.length * 1.4 +
     state.projectiles.length * 0.85 +
     state.enemyAttacks.length * 1.15 +
     state.damageNumbers.length * 0.4 +
     state.allies.length * 0.75;
+  const massSkillActive = hasActiveMassSkillEffect();
+  if (massSkillActive && state.enemies.length >= 60) {
+    loadScore += state.enemies.length >= 100 ? 250 : 170;
+  }
   if (perf.fpsSmooth < 30 || loadScore > 340) {
     return (_framePerformanceTier = 3);
   }
@@ -2709,6 +2770,7 @@ function update(dt) {
     profileUpdateStage("allyVsEnemy", () => resolveAllyEnemyCollisions(state.enemyGrid));
     profileUpdateStage("enemyAttacks", () => updateEnemyAttacks(simDt));
     profileUpdateStage("playerDamage", () => resolvePlayerEnemyDamage(simDt, state.enemyGrid));
+    profileUpdateStage("massXpDrops", () => flushMassXpDropBudget());
     profileUpdateStage("pickups", () => updatePickups(simDt));
     profileUpdateStage("portal", () => updatePortal?.(simDt));
     profileUpdateStage("cleanup", cleanupDeadEntities);
@@ -2729,6 +2791,7 @@ function update(dt) {
     resolveAllyEnemyCollisions(state.enemyGrid);
     updateEnemyAttacks(simDt);
     resolvePlayerEnemyDamage(simDt, state.enemyGrid);
+    flushMassXpDropBudget();
     updatePickups(simDt);
     updatePortal?.(simDt);
     cleanupDeadEntities();
@@ -3294,6 +3357,9 @@ function spawnHealPickup() {
 function spawnXpDrops(enemy) {
   const { x: sourceX, y: sourceY, xpReward: totalXp, isBoss } = enemy;
   const scaledXp = Math.max(1, Math.round(totalXp * state.player.xpMultiplier));
+  if (!isBoss && shouldDeferMassXpDrop(enemy, scaledXp)) {
+    return;
+  }
   const placementContext = getPickupPlacementContext();
   let orbBudget = scaledXp;
   if (isBoss) {
@@ -3337,6 +3403,58 @@ function spawnXpDrops(enemy) {
     placementContext.push(pickup);
     spawnPickupSpawnEffect(anchor.x, anchor.y, "xp-orb");
   }
+}
+
+function getMassXpDropBudget() {
+  const budget = state.performance.massXpDropBudget ?? (state.performance.massXpDropBudget = {
+    tick: -1,
+    drops: 0,
+    pendingXp: 0,
+    pendingX: 0,
+    pendingY: 0,
+  });
+  if (budget.tick !== state.tick) {
+    flushMassXpDropBudget(budget);
+    budget.tick = state.tick;
+    budget.drops = 0;
+    budget.pendingXp = 0;
+    budget.pendingX = 0;
+    budget.pendingY = 0;
+  }
+  return budget;
+}
+
+function shouldDeferMassXpDrop(enemy, scaledXp) {
+  const source = enemy.lastDamageSource ?? "";
+  if (!isSkillSoundSource(source)) {
+    return false;
+  }
+  const budget = getMassXpDropBudget();
+  const perfTier = getPerformanceTier();
+  const immediateDropCap = perfTier >= 3 ? 4 : perfTier >= 2 ? 7 : perfTier >= 1 ? 10 : 14;
+  budget.drops += 1;
+  if (budget.drops <= immediateDropCap) {
+    return false;
+  }
+  budget.pendingXp += scaledXp;
+  budget.pendingX += enemy.x * scaledXp;
+  budget.pendingY += enemy.y * scaledXp;
+  return true;
+}
+
+function flushMassXpDropBudget(budget = state.performance?.massXpDropBudget) {
+  if (!budget || budget.pendingXp <= 0) {
+    return;
+  }
+  const xp = Math.max(1, Math.round(budget.pendingXp));
+  const x = budget.pendingX / Math.max(1, budget.pendingXp);
+  const y = budget.pendingY / Math.max(1, budget.pendingXp);
+  const placementContext = getPickupPlacementContext();
+  const anchor = pickXpDropPosition(x, y, 17, 24, 84, placementContext);
+  spawnXpCache(anchor.x, anchor.y, xp, placementContext);
+  budget.pendingXp = 0;
+  budget.pendingX = 0;
+  budget.pendingY = 0;
 }
 
 function spawnXpCache(x, y, xpAmount, placementContext = null) {
@@ -4687,12 +4805,15 @@ function updateEnemiesAndSpatialGrid(dt) {
   const separationIntensity = manyEnemies && state.tick % 2 === 1 ? 0.6 : 1;
   const perfTier = getPerformanceTier();
   const crowdPressure = localCrowd >= 26;
+  const massSkillCrowdPressure = crowdPressure && hasActiveMassSkillEffect();
   const separationPairBudgetBase = perfTier >= 3 ? 900 : perfTier >= 2 ? 1500 : perfTier >= 1 ? 2400 : 3600;
   const crowdPenalty = state.enemies.length >= 140 ? 0.62 : state.enemies.length >= 100 ? 0.78 : 1;
-  const pressurePenalty = crowdPressure ? 0.52 : 1;
+  const pressurePenalty = crowdPressure ? (massSkillCrowdPressure ? 0.82 : 0.52) : 1;
   const separationPairBudget = Math.max(320, Math.floor(separationPairBudgetBase * crowdPenalty * pressurePenalty));
-  const separationIntensityScaled = crowdPressure ? separationIntensity * 0.72 : separationIntensity;
-  const shouldRunSeparation = !crowdPressure || state.tick % 2 === 0;
+  const separationIntensityScaled = crowdPressure
+    ? separationIntensity * (massSkillCrowdPressure ? 0.94 : 0.72)
+    : separationIntensity;
+  const shouldRunSeparation = massSkillCrowdPressure || !crowdPressure || state.tick % 2 === 0;
   if (shouldRunSeparation) {
     applyEnemySeparation(state.enemyGrid, separationIntensityScaled, player, separationPairBudget);
   }
@@ -6627,6 +6748,59 @@ function getCombatFrameBudget() {
   return budget;
 }
 
+function getSkillPerfCounters() {
+  const perf = state.performance;
+  const counters = perf.skillPerfCounters ?? (perf.skillPerfCounters = {
+    tick: -1,
+    skillQueryMs: 0,
+    skillApplyMs: 0,
+    deathSideEffectsMs: 0,
+    xpDropMs: 0,
+    queuedHits: 0,
+    appliedHits: 0,
+    visualMarkers: 0,
+  });
+  if (counters.tick !== state.tick) {
+    counters.tick = state.tick;
+    counters.skillQueryMs = 0;
+    counters.skillApplyMs = 0;
+    counters.deathSideEffectsMs = 0;
+    counters.xpDropMs = 0;
+    counters.queuedHits = 0;
+    counters.appliedHits = 0;
+    counters.visualMarkers = 0;
+  }
+  return counters;
+}
+
+function measureSkillPerf(key, callback) {
+  const start = performance.now();
+  const result = callback();
+  getSkillPerfCounters()[key] += performance.now() - start;
+  return result;
+}
+
+function shouldSpawnDefeatFxThisFrame(enemy) {
+  if (enemy.isBoss) {
+    return true;
+  }
+  const perfTier = getPerformanceTier();
+  const cap = perfTier >= 3 ? 4 : perfTier >= 2 ? 7 : perfTier >= 1 ? 11 : 16;
+  const budget = state.performance.deathFxFrameBudget ?? (state.performance.deathFxFrameBudget = {
+    tick: -1,
+    count: 0,
+  });
+  if (budget.tick !== state.tick) {
+    budget.tick = state.tick;
+    budget.count = 0;
+  }
+  if (budget.count >= cap) {
+    return false;
+  }
+  budget.count += 1;
+  return true;
+}
+
 function dealDamageToEnemy(enemy, amount, source = "generic") {
   if (enemy.dead || amount <= 0) {
     return false;
@@ -6652,6 +6826,7 @@ function dealDamageToEnemy(enemy, amount, source = "generic") {
     enemy.nextSkillDamageNumberAt = Math.max(enemy.nextSkillDamageNumberAt ?? 0, state.elapsed + 0.08);
   }
   enemy.hp -= amount;
+  enemy.lastDamageSource = source;
   if (!isSkillSource) {
     const hitSfxFrameCap = perfTier >= 2 ? 1 : perfTier >= 1 ? 2 : 3;
     if (frameBudget.hitSfx < hitSfxFrameCap) {
@@ -6739,19 +6914,25 @@ function spawnDamageNumber(x, y, amount, source) {
   }
   const cap = perfTier >= 2 ? 18 : perfTier >= 1 ? 30 : 52;
   if (state.damageNumbers.length >= cap) {
-    state.damageNumbers.splice(0, state.damageNumbers.length - (cap - 1));
+    const removeCount = state.damageNumbers.length - (cap - 1);
+    const pool = state.performance.damageNumberPool ?? (state.performance.damageNumberPool = []);
+    for (let index = 0; index < removeCount; index += 1) {
+      pool.push(state.damageNumbers[index]);
+    }
+    state.damageNumbers.splice(0, removeCount);
   }
-  state.damageNumbers.push({
-    id: state.nextEntityId++,
-    x: x + randRange(-8, 8),
-    y: y + randRange(-6, 6),
-    vx: randRange(-10, 10),
-    vy: -randRange(28, 42),
-    life: 0.56,
-    maxLife: 0.56,
-    amount: Math.max(1, Math.round(amount)),
-    color: getDamageNumberColor(source),
-  });
+  const pool = state.performance.damageNumberPool ?? (state.performance.damageNumberPool = []);
+  const number = pool.pop() ?? {};
+  number.id = state.nextEntityId++;
+  number.x = x + randRange(-8, 8);
+  number.y = y + randRange(-6, 6);
+  number.vx = randRange(-10, 10);
+  number.vy = -randRange(28, 42);
+  number.life = 0.56;
+  number.maxLife = 0.56;
+  number.amount = Math.max(1, Math.round(amount));
+  number.color = getDamageNumberColor(source);
+  state.damageNumbers.push(number);
 }
 
 function spawnNecroThrall(x, y, spec = {}) {
@@ -6923,8 +7104,14 @@ function onEnemyDefeated(enemy, source = "unknown") {
   state.killBreakdown[enemy.type] = (state.killBreakdown[enemy.type] ?? 0) + 1;
   state.score += enemy.reward;
   state.corpses.push({ x: enemy.x, y: enemy.y, type: enemy.type, life: 12, radius: enemy.radius });
-  spawnDefeatEffect(enemy);
-  spawnXpDrops(enemy);
+  measureSkillPerf("deathSideEffectsMs", () => {
+    if (shouldSpawnDefeatFxThisFrame(enemy)) {
+      spawnDefeatEffect(enemy);
+    }
+  });
+  measureSkillPerf("xpDropMs", () => {
+    spawnXpDrops(enemy);
+  });
   if (enemy.type === "brood") {
     spawnBossMinions(enemy, ["runner", "runner"]);
   }
@@ -7172,28 +7359,128 @@ function updateEffects(dt) {
   const pressureDivisor = activeZoneEffects >= 10 ? 2.4 : activeZoneEffects >= 7 ? 1.9 : activeZoneEffects >= 5 ? 1.45 : 1;
   const zoneTickTargetBudget = Math.max(8, Math.floor(baseZoneTickBudget / pressureDivisor));
   const zoneTickScanBudget = zoneTickTargetBudget * 4;
+  const massSkillBudget = state.performance.massSkillFrameBudget ?? (state.performance.massSkillFrameBudget = { tick: -1, remaining: 0 });
+  if (massSkillBudget.tick !== state.tick) {
+    massSkillBudget.tick = state.tick;
+    massSkillBudget.remaining = perfTier >= 3 ? 16 : perfTier >= 2 ? 24 : perfTier >= 1 ? 34 : 44;
+  }
+  const massSkillQueue = state.performance.massSkillQueue ?? (state.performance.massSkillQueue = []);
   function inZoneRadius(enemy, x, y, radius) {
     const dx = enemy.x - x;
     const dy = enemy.y - y;
     const maxRadius = radius + enemy.radius;
     return dx * dx + dy * dy <= maxRadius * maxRadius;
   }
-  function runCappedZonePass(originX, originY, scanRadius, handler) {
-    let scans = 0;
-    let applied = 0;
-    visitEnemiesInRange(originX, originY, scanRadius, (enemy) => {
-      if (applied >= zoneTickTargetBudget || scans >= zoneTickScanBudget) {
-        return;
-      }
-      scans += 1;
-      if (enemy.dead) {
-        return;
-      }
-      if (handler(enemy) === true) {
-        applied += 1;
-      }
-    });
+  function markMassSkillCandidate(enemy) {
+    enemy.healthBarVisibleUntil = Math.max(enemy.healthBarVisibleUntil ?? 0, state.elapsed + 0.24);
+    getSkillPerfCounters().visualMarkers += 1;
   }
+  function getMassSkillQueryCandidates(originX, originY, scanRadius, scanLimit) {
+    const cache = state.performance.massSkillQueryCache ?? (state.performance.massSkillQueryCache = {
+      tick: -1,
+      values: new Map(),
+    });
+    if (cache.tick !== state.tick) {
+      cache.tick = state.tick;
+      cache.values.clear();
+    }
+    const key = `${Math.round(originX)}:${Math.round(originY)}:${Math.round(scanRadius)}:${scanLimit}`;
+    const cached = cache.values.get(key);
+    if (cached) {
+      return cached;
+    }
+    const candidates = measureSkillPerf("skillQueryMs", () => {
+      const found = [];
+      let scans = 0;
+      visitEnemiesInRange(originX, originY, scanRadius, (enemy) => {
+        if (scans >= scanLimit) {
+          return;
+        }
+        scans += 1;
+        if (!enemy.dead) {
+          found.push(enemy);
+        }
+      });
+      return found;
+    });
+    cache.values.set(key, candidates);
+    return candidates;
+  }
+  function processMassSkillQueue() {
+    if (massSkillQueue.length === 0 || massSkillBudget.remaining <= 0) {
+      return;
+    }
+    let writeIndex = 0;
+    for (let queueIndex = 0; queueIndex < massSkillQueue.length; queueIndex += 1) {
+      const job = massSkillQueue[queueIndex];
+      if (!job || massSkillBudget.remaining <= 0) {
+        massSkillQueue[writeIndex] = job;
+        writeIndex += 1;
+        continue;
+      }
+      while (job.index < job.targets.length && massSkillBudget.remaining > 0) {
+        const enemy = job.targets[job.index];
+        job.index += 1;
+        if (!enemy || enemy.dead) {
+          continue;
+        }
+        measureSkillPerf("skillApplyMs", () => job.apply(enemy));
+        getSkillPerfCounters().appliedHits += 1;
+        massSkillBudget.remaining -= 1;
+      }
+      if (job.index < job.targets.length) {
+        massSkillQueue[writeIndex] = job;
+        writeIndex += 1;
+      }
+    }
+    massSkillQueue.length = writeIndex;
+  }
+  function runBatchedZonePass(originX, originY, scanRadius, predicate, apply) {
+    processMassSkillQueue();
+    const targets = [];
+    const scanLimit = Math.max(zoneTickScanBudget, zoneTickTargetBudget * 8);
+    const candidates = getMassSkillQueryCandidates(originX, originY, scanRadius, scanLimit);
+    for (const enemy of candidates) {
+      if (!enemy || enemy.dead) {
+        continue;
+      }
+      if (predicate(enemy) === true) {
+        markMassSkillCandidate(enemy);
+        targets.push(enemy);
+      }
+    }
+    if (targets.length === 0) {
+      return;
+    }
+    if (targets.length > 1) {
+      const playerX = state.player.x;
+      const playerY = state.player.y;
+      targets.sort((a, b) => {
+        const adx = a.x - playerX;
+        const ady = a.y - playerY;
+        const bdx = b.x - playerX;
+        const bdy = b.y - playerY;
+        return adx * adx + ady * ady - (bdx * bdx + bdy * bdy);
+      });
+    }
+    const immediateCap = perfTier >= 2 ? 8 : 12;
+    const immediateLimit = Math.min(targets.length, Math.max(0, massSkillBudget.remaining), immediateCap);
+    let index = 0;
+    for (; index < immediateLimit; index += 1) {
+      const enemy = targets[index];
+      if (!enemy || enemy.dead) {
+        continue;
+      }
+      measureSkillPerf("skillApplyMs", () => apply(enemy));
+      getSkillPerfCounters().appliedHits += 1;
+      massSkillBudget.remaining = Math.max(0, massSkillBudget.remaining - 1);
+    }
+    if (index < targets.length) {
+      massSkillQueue.push({ targets, index, apply });
+      getSkillPerfCounters().queuedHits += targets.length - index;
+    }
+  }
+  processMassSkillQueue();
 
   for (const effect of state.effects) {
     effect.life -= dt;
@@ -7212,9 +7499,13 @@ function updateEffects(dt) {
     if (effect.kind === "particle-burst") {
       let aliveCount = 0;
       let maxParticleLife = 0;
+      const particlePool = state.performance.particlePool ?? (state.performance.particlePool = []);
       for (const particle of effect.particles) {
         particle.life -= dt;
         if (particle.life <= 0) {
+          if (particlePool.length < 320) {
+            particlePool.push(particle);
+          }
           continue;
         }
         particle.x += particle.vx * dt;
@@ -7225,6 +7516,9 @@ function updateEffects(dt) {
         maxParticleLife = Math.max(maxParticleLife, particle.life);
       }
       effect.life = aliveCount > 0 ? maxParticleLife : 0;
+      if (aliveCount === 0) {
+        effect.particles.length = 0;
+      }
       continue;
     }
 
@@ -7253,13 +7547,11 @@ function updateEffects(dt) {
       }
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
-        runCappedZonePass(effect.x, effect.y, effect.radius + 48, (enemy) => {
-          if (!inZoneRadius(enemy, effect.x, effect.y, effect.radius)) {
-            return false;
-          }
+        runBatchedZonePass(effect.x, effect.y, effect.radius + 48, (enemy) => (
+          inZoneRadius(enemy, effect.x, effect.y, effect.radius)
+        ), (enemy) => {
           const distance = Math.hypot(enemy.x - effect.x, enemy.y - effect.y);
           applyZoneTick(effect, enemy, 1 - Math.min(0.55, distance / Math.max(1, effect.radius) * 0.35));
-          return true;
         });
       }
       continue;
@@ -7270,17 +7562,15 @@ function updateEffects(dt) {
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
         const { currentLength, currentWidth, centerX, centerY } = getCrosswindMetrics(effect, clamp(effect.life / effect.maxLife, 0, 1));
-        runCappedZonePass(centerX, centerY, Math.max(currentLength, currentWidth) * 0.6 + 48, (enemy) => {
-          if (!pointInRotatedRect(enemy.x, enemy.y, centerX, centerY, effect.angle, currentLength * 0.5, currentWidth * 0.5 + enemy.radius)) {
-            return false;
-          }
+        runBatchedZonePass(centerX, centerY, Math.max(currentLength, currentWidth) * 0.6 + 48, (enemy) => (
+          pointInRotatedRect(enemy.x, enemy.y, centerX, centerY, effect.angle, currentLength * 0.5, currentWidth * 0.5 + enemy.radius)
+        ), (enemy) => {
           applyZoneTick(effect, enemy, 1);
           const sidewaysX = -Math.sin(effect.angle);
           const sidewaysY = Math.cos(effect.angle);
           const side = Math.sign((enemy.x - effect.x) * sidewaysX + (enemy.y - effect.y) * sidewaysY) || 1;
           enemy.knockbackVX += sidewaysX * side * 260;
           enemy.knockbackVY += sidewaysY * side * 260;
-          return true;
         });
       }
       continue;
@@ -7290,20 +7580,20 @@ function updateEffects(dt) {
       effect.tickTimer -= dt;
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
-        runCappedZonePass(effect.x, effect.y, effect.radius + 48, (enemy) => {
+        runBatchedZonePass(effect.x, effect.y, effect.radius + 48, (enemy) => {
           const dx = effect.x - enemy.x;
           const dy = effect.y - enemy.y;
           const maxRadius = effect.radius + enemy.radius;
           const distanceSq = dx * dx + dy * dy;
-          if (distanceSq > maxRadius * maxRadius) {
-            return false;
-          }
-          const distance = Math.sqrt(distanceSq);
+          return distanceSq <= maxRadius * maxRadius;
+        }, (enemy) => {
+          const dx = effect.x - enemy.x;
+          const dy = effect.y - enemy.y;
+          const distance = Math.hypot(dx, dy);
           applyZoneTick(effect, enemy, 1);
           const pull = 120 + (1 - distance / Math.max(1, effect.radius)) * 220;
           enemy.knockbackVX += (dx / Math.max(1, distance)) * pull;
           enemy.knockbackVY += (dy / Math.max(1, distance)) * pull;
-          return true;
         });
       }
       continue;
@@ -7313,17 +7603,15 @@ function updateEffects(dt) {
       effect.armTime -= dt;
       if (!effect.burstDone && effect.armTime <= 0) {
         effect.burstDone = true;
-        runCappedZonePass(effect.x, effect.y, effect.radius + 48, (enemy) => {
-          if (!inZoneRadius(enemy, effect.x, effect.y, effect.radius)) {
-            return false;
-          }
+        runBatchedZonePass(effect.x, effect.y, effect.radius + 48, (enemy) => (
+          inZoneRadius(enemy, effect.x, effect.y, effect.radius)
+        ), (enemy) => {
           applyZoneTick(effect, enemy, 1);
           if (effect.kind === "permafrost-seal") {
             applyEnemyChill(enemy, enemy.isBoss ? 3.4 : 5, 2.6);
           } else {
             applyEnemyBurn(enemy, enemy.isBoss ? 5 : 7, 4.2);
           }
-          return true;
         });
         if (effect.kind === "ash-comet") {
           pushEffect({
@@ -7348,12 +7636,10 @@ function updateEffects(dt) {
       effect.tickTimer -= dt;
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
-        runCappedZonePass(effect.x, effect.y, effect.radius + 48, (enemy) => {
-          if (!inZoneRadius(enemy, effect.x, effect.y, effect.radius)) {
-            return false;
-          }
+        runBatchedZonePass(effect.x, effect.y, effect.radius + 48, (enemy) => (
+          inZoneRadius(enemy, effect.x, effect.y, effect.radius)
+        ), (enemy) => {
           applyZoneTick(effect, enemy, 1);
-          return true;
         });
       }
       continue;
@@ -7364,20 +7650,13 @@ function updateEffects(dt) {
       if (effect.tickTimer <= 0) {
         effect.tickTimer += effect.interval;
         const progress = 1 - effect.life / effect.maxLife;
-        const orbTargetBudget = Math.max(8, Math.floor(zoneTickTargetBudget * 0.7));
         for (let orb = 0; orb < effect.orbitCount; orb += 1) {
-          let orbHits = 0;
           const angle = progress * 24.6 + (orb / effect.orbitCount) * Math.PI * 2;
           const orbX = effect.x + Math.cos(angle) * effect.radius;
           const orbY = effect.y + Math.sin(angle) * effect.radius;
-          visitEnemiesInRange(orbX, orbY, 36, (enemy) => {
-            if (orbHits >= orbTargetBudget) {
-              return;
-            }
-            if (enemy.dead || !circlesOverlap(orbX, orbY, 18, enemy.x, enemy.y, enemy.radius)) {
-              return;
-            }
-            orbHits += 1;
+          runBatchedZonePass(orbX, orbY, 36, (enemy) => (
+            circlesOverlap(orbX, orbY, 18, enemy.x, enemy.y, enemy.radius)
+          ), (enemy) => {
             applyZoneTick(effect, enemy, 1);
             applyEnemyNecroMark(enemy);
           });
@@ -7389,15 +7668,17 @@ function updateEffects(dt) {
     if (effect.kind === "holy-wave") {
       const progress = 1 - effect.life / effect.maxLife;
       const radius = effect.size + progress * effect.growth;
-      runCappedZonePass(effect.x, effect.y, radius + effect.thickness + 36, (enemy) => {
+      runBatchedZonePass(effect.x, effect.y, radius + effect.thickness + 36, (enemy) => {
         if (effect.hitIds.has(enemy.id)) {
           return false;
         }
         const distance = Math.hypot(enemy.x - effect.x, enemy.y - effect.y);
-        if (Math.abs(distance - radius) > enemy.radius + effect.thickness) {
-          return false;
+        return Math.abs(distance - radius) <= enemy.radius + effect.thickness;
+      }, (enemy) => {
+        if (effect.hitIds.has(enemy.id)) {
+          return;
         }
-
+        const distance = Math.hypot(enemy.x - effect.x, enemy.y - effect.y);
         effect.hitIds.add(enemy.id);
         const damage = effect.damage * (enemy.isBoss ? 0.62 : 1);
         enemy.knockbackVX += ((enemy.x - effect.x) / Math.max(1, distance)) * 280;
@@ -7406,7 +7687,6 @@ function updateEffects(dt) {
         enemy.slowTimer = Math.max(enemy.slowTimer, 0.32);
         spawnHitEffect(enemy.x, enemy.y, "holy", enemy.x - effect.x, enemy.y - effect.y);
         dealDamageToEnemy(enemy, damage, "holy-wave");
-        return true;
       });
       continue;
     }
@@ -7422,11 +7702,22 @@ function updateEffects(dt) {
   }
 
   let aliveEffectCount = 0;
+  const effectPool = state.performance.effectPool ?? (state.performance.effectPool = []);
   for (let i = 0; i < state.effects.length; i += 1) {
     const effect = state.effects[i];
     if (effect.life > 0) {
       state.effects[aliveEffectCount] = effect;
       aliveEffectCount += 1;
+    } else if (
+      effectPool.length < 180 &&
+      (
+        effect.kind === "ring" ||
+        effect.kind === "spark" ||
+        effect.kind === "ember" ||
+        effect.kind === "particle-burst"
+      )
+    ) {
+      effectPool.push(effect);
     }
   }
   state.effects.length = aliveEffectCount;
@@ -7442,11 +7733,14 @@ function updateEffects(dt) {
     number.vy = number.vy * Math.exp(-4.2 * dt) - 12 * dt;
   }
   let aliveDamageCount = 0;
+  const damageNumberPool = state.performance.damageNumberPool ?? (state.performance.damageNumberPool = []);
   for (let i = 0; i < state.damageNumbers.length; i += 1) {
     const number = state.damageNumbers[i];
     if (number.life > 0) {
       state.damageNumbers[aliveDamageCount] = number;
       aliveDamageCount += 1;
+    } else if (damageNumberPool.length < 96) {
+      damageNumberPool.push(number);
     }
   }
   state.damageNumbers.length = aliveDamageCount;
