@@ -3108,11 +3108,12 @@ function rollBossEncounterDelay(encounterIndex) {
 }
 
 function getEligibleBossTypes(atTime = state?.elapsed ?? 0) {
+  const isFirstBossEncounter = (state?.bossDirector?.encounterIndex ?? 0) <= 0 && !state?.lastBossType;
   return BOSS_TYPES.filter((type) => {
     if ((state?.bossDefeats?.[type] ?? 0) >= 3) {
       return false;
     }
-    if (type === "colossus" && (state?.bossDirector?.encounterIndex ?? 0) <= 0) {
+    if (type === "colossus" && isFirstBossEncounter) {
       return false;
     }
     return atTime >= (BOSS_UNLOCK_TIMES[type] ?? 0);
