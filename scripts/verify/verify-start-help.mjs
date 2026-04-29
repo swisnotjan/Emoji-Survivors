@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "file:///C:/Users/san%20day/.codex/node_modules/playwright/index.mjs";
+import { chromium, pageUrl, verifyOutputDir, repoRoot } from './playwright-loader.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const outDir = path.join(root, "output", "web-game", "verify-start-help");
@@ -43,7 +43,7 @@ try {
     }
   });
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(`http://localhost:${port}/index.html`);
+  await page.goto(pageUrl('index.html'));
   await page.evaluate(() => localStorage.removeItem("emoji-survivors-howto-seen-v1"));
   await page.reload();
   await page.waitForSelector("#startOverlay:not(.hidden)");

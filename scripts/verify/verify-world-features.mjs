@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { chromium } from "file:///C:/Users/san%20day/.codex/node_modules/playwright/index.mjs";
+import { chromium, pageUrl, verifyOutputDir, repoRoot } from './playwright-loader.mjs';
 
-const outDir = path.resolve("output/web-game/verify-world-features");
+const outDir = verifyOutputDir('verify-world-features');
 fs.mkdirSync(outDir, { recursive: true });
-const url = "file:///D:\tryings\vibecoding\Games\emoji-survivors/index.html";
+const url = pageUrl('index.html');
 
 function pickNearest(features, group) {
   const filtered = features.filter((feature) => feature.group === group);

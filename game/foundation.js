@@ -88,16 +88,90 @@ const EMOJI_ATLAS = {
 };
 const EMOJI_TEXT_SEGMENT_REGEX = /(\p{Extended_Pictographic}\uFE0F?)/gu;
 const EMOJI_TEXT_TEST_REGEX = /\p{Extended_Pictographic}\uFE0F?/u;
+const EMOJI_CLUSTER_REGEX = /\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?(?:\u200D(?:\p{Extended_Pictographic}|\u2640|\u2642)(?:\uFE0F|\p{Emoji_Modifier})?)*/uy;
 const EMOJI_SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "CANVAS", "SVG"]);
 let emojiDomObserver = null;
 let emojiDomPassScheduled = false;
 const emojiPendingRoots = new Set();
+let emojiAtlasKeysByLength = [];
+const WINDOWS_1252_REVERSE = {
+  0x20AC: 0x80,
+  0x201A: 0x82,
+  0x0192: 0x83,
+  0x201E: 0x84,
+  0x2026: 0x85,
+  0x2020: 0x86,
+  0x2021: 0x87,
+  0x02C6: 0x88,
+  0x2030: 0x89,
+  0x0160: 0x8A,
+  0x2039: 0x8B,
+  0x0152: 0x8C,
+  0x017D: 0x8E,
+  0x2018: 0x91,
+  0x2019: 0x92,
+  0x201C: 0x93,
+  0x201D: 0x94,
+  0x2022: 0x95,
+  0x2013: 0x96,
+  0x2014: 0x97,
+  0x02DC: 0x98,
+  0x2122: 0x99,
+  0x0161: 0x9A,
+  0x203A: 0x9B,
+  0x0153: 0x9C,
+  0x017E: 0x9E,
+  0x0178: 0x9F,
+};
+const EMOJI_ATLAS_FALLBACKS = {
+  "🧝🏻‍♂️": "🧝",
+  "🧙🏻‍♂️": "🧙",
+  "🫅🏻": "🫅",
+  "🧝🏿": "💀",
+  "🧛🏻": "🧛",
+};
 
 function normalizeEmojiGlyphKey(value) {
   if (!value) {
     return "";
   }
   return String(value).replace(/\uFE0F/g, "");
+}
+
+function repairMojibakeEmojiKey(value) {
+  if (!value || !/[ÃÂâð]/.test(value)) {
+    return value;
+  }
+  try {
+    const bytes = [];
+    for (const char of String(value)) {
+      const codePoint = char.codePointAt(0);
+      bytes.push(WINDOWS_1252_REVERSE[codePoint] ?? (codePoint <= 255 ? codePoint : 63));
+    }
+    return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes));
+  } catch {
+    return value;
+  }
+}
+
+function getEmojiFallbackKeys(emoji) {
+  const value = String(emoji ?? "");
+  const repaired = repairMojibakeEmojiKey(value);
+  const noTone = repaired.replace(/[\u{1F3FB}-\u{1F3FF}]/gu, "");
+  const noGender = noTone.replace(/\u200D[\u2640\u2642]\uFE0F?/g, "");
+  return [
+    value,
+    EMOJI_ATLAS_FALLBACKS[value],
+    repaired,
+    EMOJI_ATLAS_FALLBACKS[repaired],
+    normalizeEmojiGlyphKey(repaired),
+    noTone,
+    EMOJI_ATLAS_FALLBACKS[noTone],
+    normalizeEmojiGlyphKey(noTone),
+    noGender,
+    EMOJI_ATLAS_FALLBACKS[noGender],
+    normalizeEmojiGlyphKey(noGender),
+  ].filter(Boolean);
 }
 
 async function initWin11EmojiAtlas() {
@@ -115,8 +189,17 @@ async function initWin11EmojiAtlas() {
     image.src = EMOJI_ATLAS.url;
     await image.decode();
     EMOJI_ATLAS.image = image;
-    EMOJI_ATLAS.map = atlasData.map ?? {};
+    const sourceMap = atlasData.map ?? {};
+    EMOJI_ATLAS.map = {};
+    for (const [key, entry] of Object.entries(sourceMap)) {
+      for (const fallbackKey of getEmojiFallbackKeys(key)) {
+        EMOJI_ATLAS.map[fallbackKey] = entry;
+      }
+    }
     EMOJI_ATLAS.cellSize = atlasData.cellSize ?? 64;
+    emojiAtlasKeysByLength = Object.keys(EMOJI_ATLAS.map)
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
     EMOJI_ATLAS.ready = true;
     refreshDomEmojiSprites(document.body);
     if (typeof refreshUpgradeEmojiSprites === "function") {
@@ -132,7 +215,12 @@ function getEmojiAtlasEntry(emoji) {
   if (!EMOJI_ATLAS.ready || !EMOJI_ATLAS.map || !emoji) {
     return null;
   }
-  return EMOJI_ATLAS.map[emoji] ?? EMOJI_ATLAS.map[normalizeEmojiGlyphKey(emoji)] ?? null;
+  for (const key of getEmojiFallbackKeys(emoji)) {
+    if (EMOJI_ATLAS.map[key]) {
+      return EMOJI_ATLAS.map[key];
+    }
+  }
+  return null;
 }
 
 function drawEmojiSprite(emoji, centerX, centerY, size, options = {}) {
@@ -144,6 +232,7 @@ function drawEmojiSprite(emoji, centerX, centerY, size, options = {}) {
   const shadowBlur = options.shadowBlur ?? 0;
   const shadowColor = options.shadowColor ?? "transparent";
   ctx.save();
+  ctx.imageSmoothingEnabled = false;
   ctx.globalAlpha *= alpha;
   if (shadowBlur > 0) {
     ctx.shadowBlur = shadowBlur;
@@ -175,11 +264,12 @@ function applyEmojiSpriteToElement(element, emoji, sizePx) {
   }
   const imageWidth = EMOJI_ATLAS.image.naturalWidth || (EMOJI_ATLAS.cellSize * 10);
   const imageHeight = EMOJI_ATLAS.image.naturalHeight || (EMOJI_ATLAS.cellSize * 10);
+  const scale = sizePx / Math.max(1, EMOJI_ATLAS.cellSize);
   element.classList.add("is-emoji-sprite");
   element.style.setProperty("--emoji-size", `${sizePx}px`);
   element.style.backgroundImage = `url("${EMOJI_ATLAS.url}")`;
-  element.style.backgroundSize = `${imageWidth}px ${imageHeight}px`;
-  element.style.backgroundPosition = `${-entry.x}px ${-entry.y}px`;
+  element.style.backgroundSize = `${imageWidth * scale}px ${imageHeight * scale}px`;
+  element.style.backgroundPosition = `${-entry.x * scale}px ${-entry.y * scale}px`;
 }
 
 function isEmojiTextNodeCandidate(textNode) {
@@ -203,36 +293,83 @@ function getEmojiInlineSizePx(element) {
   return Math.max(12, Math.round(fontSize * 1.15));
 }
 
+function tokenizeEmojiText(text) {
+  const tokens = [];
+  let index = 0;
+  while (index < text.length) {
+    let matched = "";
+    for (const key of emojiAtlasKeysByLength) {
+      const normalizedKey = normalizeEmojiGlyphKey(key);
+      if (text.startsWith(key, index)) {
+        matched = text.slice(index, index + key.length);
+        break;
+      }
+      if (normalizedKey && text.startsWith(normalizedKey, index)) {
+        matched = text.slice(index, index + normalizedKey.length);
+        break;
+      }
+    }
+    if (matched) {
+      tokens.push({ type: "emoji", value: matched });
+      index += matched.length;
+      continue;
+    }
+    EMOJI_CLUSTER_REGEX.lastIndex = index;
+    const cluster = EMOJI_CLUSTER_REGEX.exec(text)?.[0] ?? "";
+    if (cluster) {
+      tokens.push({ type: "emoji", value: cluster });
+      index += cluster.length;
+      continue;
+    }
+    const codePoint = text.codePointAt(index);
+    const char = String.fromCodePoint(codePoint);
+    tokens.push({ type: "text", value: char });
+    index += char.length;
+  }
+  const merged = [];
+  for (const token of tokens) {
+    const previous = merged[merged.length - 1];
+    if (previous && previous.type === token.type && token.type === "text") {
+      previous.value += token.value;
+    } else {
+      merged.push(token);
+    }
+  }
+  return merged;
+}
+
 function convertEmojiTextNode(textNode) {
   if (!isEmojiTextNodeCandidate(textNode)) {
     return false;
   }
   const text = textNode.nodeValue ?? "";
-  const parts = text.split(EMOJI_TEXT_SEGMENT_REGEX);
-  if (parts.length <= 1) {
+  const parts = emojiAtlasKeysByLength.length > 0 ? tokenizeEmojiText(text) : text.split(EMOJI_TEXT_SEGMENT_REGEX).map((part) => ({
+    type: EMOJI_TEXT_TEST_REGEX.test(part) ? "emoji" : "text",
+    value: part,
+  }));
+  if (!parts.some((part) => part.type === "emoji")) {
     return false;
   }
   const fragment = document.createDocumentFragment();
   for (const part of parts) {
-    if (!part) {
+    if (!part.value) {
       continue;
     }
-    if (EMOJI_TEXT_TEST_REGEX.test(part)) {
+    if (part.type === "emoji") {
       const emojiSpan = document.createElement("span");
       emojiSpan.className = "emoji-inline-sprite";
-      emojiSpan.textContent = part;
-      applyEmojiSpriteToElement(emojiSpan, part, getEmojiInlineSizePx(emojiSpan));
+      emojiSpan.textContent = part.value;
+      applyEmojiSpriteToElement(emojiSpan, part.value, getEmojiInlineSizePx(emojiSpan));
       fragment.appendChild(emojiSpan);
       continue;
     }
-    fragment.appendChild(document.createTextNode(part));
+    fragment.appendChild(document.createTextNode(part.value));
   }
   textNode.parentNode?.replaceChild(fragment, textNode);
   return true;
 }
 
 function refreshDomEmojiSprites(root) {
-  return;
   if (!root) {
     return;
   }
@@ -284,7 +421,6 @@ function scheduleEmojiDomRefresh(root) {
 }
 
 function startGlobalEmojiSpriteSync() {
-  return;
   if (emojiDomObserver) {
     return;
   }
@@ -2672,6 +2808,9 @@ function rollBossEncounterDelay(encounterIndex) {
 function getEligibleBossTypes(atTime = state?.elapsed ?? 0) {
   return BOSS_TYPES.filter((type) => {
     if ((state?.bossDefeats?.[type] ?? 0) >= 3) {
+      return false;
+    }
+    if (type === "colossus" && (state?.bossDirector?.encounterIndex ?? 0) <= 0) {
       return false;
     }
     return atTime >= (BOSS_UNLOCK_TIMES[type] ?? 0);

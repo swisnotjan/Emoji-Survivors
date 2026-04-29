@@ -1,13 +1,13 @@
-import { chromium } from 'file:///C:/Users/san%20day/.codex/node_modules/playwright/index.mjs';
+import { chromium, pageUrl, verifyOutputDir, repoRoot } from './playwright-loader.mjs';
 import fs from 'fs/promises';
 import path from 'path';
 import http from 'http';
 import { spawn } from 'child_process';
 
-const root = process.cwd();
+const root = repoRoot;
 const port = 4175;
 const baseUrl = `http://localhost:${port}`;
-const outDir = path.join(root, 'output/web-game/verify-boss-random-balance');
+const outDir = verifyOutputDir('verify-boss-random-balance');
 await fs.mkdir(outDir, { recursive: true });
 
 const server = spawn(process.execPath, [path.join(root, 'scripts/serve-static.mjs')], {

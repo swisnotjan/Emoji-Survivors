@@ -484,7 +484,7 @@
       color: "#8ed8ff",
       projectileColor: "#9fe2ff",
       projectileRgb: "159, 226, 255",
-      autoDamage: 10,
+      autoDamage: 12,
       speedMultiplier: 1,
       maxHpMultiplier: 1,
       passiveLabel: "Cold Equation",

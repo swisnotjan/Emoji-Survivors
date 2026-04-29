@@ -186,6 +186,7 @@ function createInitialState(classId = "wind") {
     bossSeen: {},
     corpses: [],
     allies: [],
+    delayedNecroSummons: [],
     cameraShake: {
       timer: 0,
       power: 0,
@@ -222,7 +223,9 @@ function createInitialState(classId = "wind") {
       manual: false,
       focus: false,
       upgradesPanel: false,
+      upgradesFromPauseMenu: false,
       helpPanel: false,
+      helpFromPauseMenu: false,
       devMenu: false,
       codexTab: "build",
     },
@@ -249,6 +252,7 @@ function createInitialState(classId = "wind") {
       minInterval: SPAWN_DIRECTOR_CONFIG.minInterval,
       maxEnemiesOnField: SPAWN_DIRECTOR_CONFIG.maxEnemiesOnField,
     },
+    enemySeen: {},
     enemies: [],
     projectiles: [],
     enemyAttacks: [],
@@ -1127,6 +1131,7 @@ function openHowToPlay(options = {}) {
   if (!howToPlayOverlay) {
     return;
   }
+  state.pause.helpFromPauseMenu = Boolean(state.pause.manual || state.pause.focus || state.pause.devMenu || state.pause.upgradesFromPauseMenu);
   state.pause.helpPanel = true;
   pressedActions.clear();
   resetTouchControls();
@@ -1145,24 +1150,33 @@ function closeHowToPlay() {
     return;
   }
   state.pause.helpPanel = false;
+  state.pause.helpFromPauseMenu = false;
   howToPlayOverlay.classList.add("hidden");
   stopHowtoPickupPreviewAnimation();
   howToPlayOverlay.classList.remove("is-first-run");
   syncMusicPauseState();
 }
 
-function shouldPauseRunMusic() {
-  return state.running
-    && !state.runEnd.active
-    && (state.pause.manual || state.pause.focus || state.pause.upgradesPanel || state.pause.helpPanel || state.pause.devMenu);
+function getRunMusicMode() {
+  if (!state.running || state.runEnd.active) {
+    return "normal";
+  }
+  if (state.pause.manual || state.pause.focus || state.pause.devMenu) {
+    return "paused";
+  }
+  if (
+    state.levelUp.active ||
+    state.bossReward.active ||
+    (state.pause.upgradesPanel && !state.pause.upgradesFromPauseMenu) ||
+    (state.pause.helpPanel && !state.pause.helpFromPauseMenu)
+  ) {
+    return "muffled";
+  }
+  return "normal";
 }
 
 function syncMusicPauseState() {
-  if (shouldPauseRunMusic()) {
-    window.sfx?.pauseRunMusic?.();
-  } else {
-    window.sfx?.resumeRunMusic?.();
-  }
+  window.sfx?.setRunMusicMode?.(getRunMusicMode());
 }
 
 function updateAudioMixerUI() {
@@ -1227,6 +1241,7 @@ function toggleStartSound() {
       window.sfx.startRunMusic?.();
     }
   }
+  syncMusicPauseState();
   updateAudioMixerUI();
 }
 
@@ -1248,6 +1263,7 @@ function setMusicVolumeFromUi(rawValue) {
   if (!window.sfx.isMuted?.() && state.running && value > 0.001 && !hadAudibleMusic && !window.sfx.isRunMusicActive?.()) {
     window.sfx.startRunMusic?.();
   }
+  syncMusicPauseState();
   updateAudioMixerUI();
 }
 
@@ -1290,6 +1306,7 @@ function toggleMusicMuteFromUi() {
     window.sfx.setMusicMuted?.(true);
     window.sfx.setMusicVolume?.(0);
   }
+  syncMusicPauseState();
   updateAudioMixerUI();
 }
 
@@ -3978,7 +3995,7 @@ function castBoneWard(mastery) {
       state.player.y + Math.sin((index / Math.max(1, 1 + mastery)) * Math.PI * 2) * 42,
       {
         sourceType: "bone-ward",
-        speed: 160 + mastery * 8,
+        speed: 128 + mastery * 6,
         damage: 11 + mastery * 2,
         life: 10 + mastery * 1.2,
         radius: 13,
@@ -4034,26 +4051,24 @@ function castGraveCall(mastery) {
   const fallbackCount = nearbyCorpses.length === 0 ? 1 : 0;
   for (const corpse of nearbyCorpses) {
     corpse.life = 0;
-    spawnNecroThrall(corpse.x, corpse.y, {
+    queueNecroThrallFromGrave(corpse.x, corpse.y, {
       sourceType: corpse.type,
       radius: Math.max(12, corpse.radius * 0.72),
-      speed: 160 + mastery * 8,
+      speed: 128 + mastery * 6,
       damage: 12 + mastery * 2,
       life: 14 + mastery * 2,
-    });
+    }, 1.0);
   }
   for (let index = 0; index < fallbackCount; index += 1) {
     const angle = (index / Math.max(1, fallbackCount)) * Math.PI * 2 + randRange(-0.22, 0.22);
-    spawnNecroThrall(
-      state.player.x + Math.cos(angle) * randRange(24, 56),
-      state.player.y + Math.sin(angle) * randRange(24, 56),
-      {
-        sourceType: "phantom",
-        speed: 162 + mastery * 8,
-        damage: 10 + mastery * 2,
-        life: 11 + mastery * 2,
-      }
-    );
+    const thrallX = state.player.x + Math.cos(angle) * randRange(24, 56);
+    const thrallY = state.player.y + Math.sin(angle) * randRange(24, 56);
+    queueNecroThrallFromGrave(thrallX, thrallY, {
+      sourceType: "phantom",
+      speed: 130 + mastery * 6,
+      damage: 10 + mastery * 2,
+      life: 11 + mastery * 2,
+    }, 1.0);
   }
   return true;
 }
@@ -4197,7 +4212,7 @@ function spawnEnemies(dt) {
       return;
     }
 
-    const plan = chooseSpawnPlan(pressure);
+    const plan = chooseSpawnPlan(pressure, { bossActive });
     if (!plan) {
       return;
     }
@@ -4209,17 +4224,22 @@ function spawnEnemies(dt) {
         return;
       }
       state.enemies.push(createEnemy(plan.type, anchor, i, spawnCount));
+      state.enemySeen[plan.type] = true;
       ambientEnemyCount += 1;
     }
   }
 }
 
-function chooseSpawnPlan(pressure) {
+function chooseSpawnPlan(pressure, options = {}) {
+  const bossActive = Boolean(options.bossActive);
   const available = [];
   let totalWeight = 0;
 
   for (const entry of SPAWN_ROSTER) {
     if (entry.unlockTime && state.elapsed < entry.unlockTime) {
+      continue;
+    }
+    if (bossActive && !state.enemySeen[entry.type]) {
       continue;
     }
     if (entry.cap && countLivingEnemiesOfType(entry.type) >= entry.cap) {
@@ -6147,6 +6167,21 @@ function updateAllies(dt) {
   }
   state.corpses = state.corpses.filter((corpse) => corpse.life > 0);
 
+  if (state.delayedNecroSummons?.length > 0) {
+    let aliveSummonCount = 0;
+    for (const summon of state.delayedNecroSummons) {
+      summon.delay -= dt;
+      if (summon.delay > 0) {
+        state.delayedNecroSummons[aliveSummonCount] = summon;
+        aliveSummonCount += 1;
+        continue;
+      }
+      const point = findNearbyWalkablePoint(summon.x, summon.y, summon.spec?.radius ?? 13, 96);
+      spawnNecroThrall(point.x, point.y, summon.spec);
+    }
+    state.delayedNecroSummons.length = aliveSummonCount;
+  }
+
   for (const ally of state.allies) {
     if (ally.dead) {
       continue;
@@ -6183,7 +6218,7 @@ function updateAllies(dt) {
       (moveX / moveLen) * ally.speed * requiemBonus.speedMultiplier * dt,
       (moveY / moveLen) * ally.speed * requiemBonus.speedMultiplier * dt,
       ally.radius,
-      { water: false, solids: false }
+      { water: true, solids: true }
     );
   }
 
@@ -6772,7 +6807,7 @@ function spawnNecroThrall(x, y, spec = {}) {
     x,
     y,
     radius: spec.radius ?? 14,
-    speed: spec.speed ?? 140,
+    speed: spec.speed ?? 116,
     damage: spec.damage ?? 11,
     life,
     maxLife: life,
@@ -6781,6 +6816,42 @@ function spawnNecroThrall(x, y, spec = {}) {
     dead: false,
   });
   trackArchiveEvent("thrall_spawned");
+  return true;
+}
+
+function spawnNecroGraveMarker(x, y) {
+  pushEffect({
+    kind: "necro-grave",
+    renderLayer: "top",
+    x,
+    y,
+    life: 0.82,
+    maxLife: 0.82,
+    size: 34,
+    color: "rgba(170, 239, 202, {a})",
+    secondaryColor: "rgba(66, 176, 120, {a})",
+    lightColor: "rgba(224, 255, 240, {a})",
+  });
+}
+
+function countPendingNecroSummons() {
+  return state.delayedNecroSummons?.length ?? 0;
+}
+
+function queueNecroThrallFromGrave(x, y, spec = {}, delay = 1.0) {
+  if (state.player.classId !== "necro") {
+    return false;
+  }
+  if (countActiveThralls() + countPendingNecroSummons() >= state.player.necroSummonCap) {
+    return false;
+  }
+  spawnNecroGraveMarker(x, y);
+  state.delayedNecroSummons.push({
+    x,
+    y,
+    delay,
+    spec,
+  });
   return true;
 }
 
@@ -6797,10 +6868,10 @@ function maybeRaiseThrall(enemy) {
   if (Math.random() > chance) {
     return;
   }
-  spawnNecroThrall(enemy.x, enemy.y, {
+  queueNecroThrallFromGrave(enemy.x, enemy.y, {
     sourceType: enemy.type,
     radius: Math.max(12, enemy.radius * 0.76),
-    speed: Math.max(160, enemy.speed * 0.88),
+    speed: Math.max(108, enemy.speed * 0.58),
     damage: 10 + enemy.radius * 0.10,
     life: 14,
   });
@@ -7622,6 +7693,7 @@ function startLevelUpPauseIfNeeded() {
   state.levelUp.active = true;
   pressedActions.clear();
   openLevelUpChoices();
+  syncMusicPauseState();
   updateHud(true);
 }
 
@@ -7636,6 +7708,7 @@ function openLevelUpChoices() {
       openLevelUpChoices();
     } else {
       state.levelUp.active = false;
+      syncMusicPauseState();
     }
     return;
   }
@@ -7645,6 +7718,7 @@ function openLevelUpChoices() {
     state.progression.pendingLevelUps = Math.max(0, state.progression.pendingLevelUps - 1);
     state.levelUp.active = false;
     levelUpOverlay.classList.add("hidden");
+    syncMusicPauseState();
     return;
   }
 
@@ -7659,12 +7733,14 @@ function openLevelUpChoices() {
   levelUpOverlay.classList.remove("hidden");
   retriggerLevelUpFlash();
   retriggerEnterAnimation(levelUpOverlay, levelUpCard);
+  syncMusicPauseState();
 }
 
 function autoResolvePendingLevelUps() {
   let safety = 32;
   state.levelUp.active = false;
   levelUpOverlay.classList.add("hidden");
+  syncMusicPauseState();
 
   while (state.progression.rewardQueue.length > 0 && safety > 0) {
     safety -= 1;
@@ -8371,6 +8447,7 @@ function applyUpgradeOption(option, config = {}) {
   } else {
     state.levelUp.active = false;
     levelUpOverlay.classList.add("hidden");
+    syncMusicPauseState();
   }
   levelUpOverlay.classList.remove("is-ascendant");
 
@@ -8402,6 +8479,7 @@ function openBossRewardChoices(enemy) {
   retriggerBossRewardFlash();
   bossRewardOverlay.classList.remove("hidden");
   retriggerEnterAnimation(bossRewardOverlay, bossRewardCard);
+  syncMusicPauseState();
   updateHud(true);
 }
 
@@ -8476,6 +8554,7 @@ function applyBossRewardOption(option) {
   state.bossReward.options = [];
   bossRewardOverlay.classList.add("hidden");
   bossRewardCard.dataset.theme = "";
+  syncMusicPauseState();
   updateHud(true);
   startLevelUpPauseIfNeeded();
 }
@@ -8498,7 +8577,9 @@ function clearPause() {
   state.pause.manual = false;
   state.pause.focus = false;
   state.pause.upgradesPanel = false;
+  state.pause.upgradesFromPauseMenu = false;
   state.pause.helpPanel = false;
+  state.pause.helpFromPauseMenu = false;
   state.pause.devMenu = false;
   state.pause.codexTab = "build";
   clearPauseMenuEndRunConfirm();
@@ -8585,9 +8666,11 @@ function openUpgradesPanel() {
   if (!state.running || state.levelUp.active || state.bossReward.active) {
     return;
   }
+  const openedFromPauseMenu = Boolean(state.pause.manual || state.pause.focus || state.pause.devMenu);
   state.pause.devMenu = false;
   state.pause.upgradesPanel = true;
-  state.pause.manual = true;
+  state.pause.upgradesFromPauseMenu = openedFromPauseMenu;
+  state.pause.manual = openedFromPauseMenu;
   state.pause.codexTab = "build";
   pressedActions.clear();
   refreshPauseOverlay();
@@ -8599,6 +8682,8 @@ function openPauseMenu() {
   }
   state.pause.devMenu = false;
   state.pause.upgradesPanel = false;
+  state.pause.upgradesFromPauseMenu = false;
+  state.pause.helpFromPauseMenu = false;
   state.pause.manual = true;
   pressedActions.clear();
   refreshPauseOverlay();
@@ -8620,6 +8705,8 @@ function toggleDevMenu() {
 
   state.pause.devMenu = true;
   state.pause.upgradesPanel = false;
+  state.pause.upgradesFromPauseMenu = false;
+  state.pause.helpFromPauseMenu = false;
   state.pause.manual = true;
   pressedActions.clear();
   refreshPauseOverlay();

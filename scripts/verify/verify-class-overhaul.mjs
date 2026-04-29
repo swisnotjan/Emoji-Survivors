@@ -1,12 +1,12 @@
-import { chromium } from 'file:///C:/Users/san%20day/.codex/node_modules/playwright/index.mjs';
+import { chromium, pageUrl, verifyOutputDir, repoRoot } from './playwright-loader.mjs';
 import fs from 'fs/promises';
 import path from 'path';
 
-const outDir = 'D:\tryings\vibecoding\Games\emoji-survivors/output/web-game/verify-class-overhaul';
+const outDir = verifyOutputDir('verify-class-overhaul');
 await fs.mkdir(outDir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-const url = 'file:///D:\tryings\vibecoding\Games\emoji-survivors/index.html';
+const url = pageUrl('index.html');
 
 async function pickOption(index = 1, waitMs = 120) {
   await page.keyboard.press(`Digit${index}`);
