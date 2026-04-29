@@ -37,7 +37,10 @@ function applyGameplayAccessGate() {
 }
 
 function bootstrapGame() {
-  initWin11EmojiAtlas?.();
+  startGlobalEmojiSpriteSync?.();
+  if (shouldUseEmojiAtlasSprites?.()) {
+    initWin11EmojiAtlas?.();
+  }
   metaProgress = loadMetaProgress();
   telemetryStore = loadTelemetryStore();
   state = createInitialState(metaProgress.selectedClassId);
