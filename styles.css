@@ -2676,10 +2676,10 @@ kbd {
   font-size: 0 !important;
   color: transparent !important;
   background-repeat: no-repeat;
-  image-rendering: pixelated;
+  image-rendering: auto;
 }
 
-.emoji-inline-sprite {
+.emoji-inline-sprite-disabled-rollback {
   display: inline-block;
   width: var(--emoji-size, 1em);
   height: var(--emoji-size, 1em);
@@ -2688,10 +2688,10 @@ kbd {
   vertical-align: -0.14em;
   line-height: 1;
   background-repeat: no-repeat;
-  image-rendering: pixelated;
+  image-rendering: auto;
 }
 
-.emoji-inline-sprite.is-emoji-sprite {
+.emoji-inline-sprite-disabled-rollback.is-emoji-sprite {
   font-size: 0 !important;
   color: transparent !important;
   overflow: hidden;

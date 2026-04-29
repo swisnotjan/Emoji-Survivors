@@ -1,11 +1,11 @@
-import { chromium, pageUrl, verifyOutputDir, repoRoot } from './playwright-loader.mjs';
+import { chromium } from 'file:///C:/Users/san%20day/.codex/node_modules/playwright/index.mjs';
 import fs from 'fs/promises';
 import path from 'path';
 import http from 'http';
 import { spawn } from 'child_process';
 
-const root = repoRoot;
-const outDir = verifyOutputDir('verify-class-boss-focus');
+const root = 'D:\tryings\vibecoding\Games\emoji-survivors';
+const outDir = path.join(root, 'output/web-game/verify-class-boss-focus');
 await fs.mkdir(outDir, { recursive: true });
 
 const server = spawn(process.execPath, [path.join(root, 'scripts/serve-static.mjs')], {
@@ -40,7 +40,7 @@ async function captureStartOverlay() {
   await page.addInitScript(() => {
     localStorage.removeItem('emoji-survivors-meta-v2');
   });
-  await page.goto(pageUrl('index.html'));
+  await page.goto('http://localhost:4173/index.html');
   await page.waitForTimeout(120);
   const lockedCards = await page.evaluate(() => Array.from(document.querySelectorAll('.class-card.is-locked')).map((card) => ({
     classId: card.dataset.classId,
@@ -59,7 +59,7 @@ async function captureStartOverlay() {
 
 async function captureBossSpawnFocus() {
   const page = await browser.newPage({ viewport: { width: 1600, height: 960 } });
-  await page.goto(pageUrl('index.html'));
+  await page.goto('http://localhost:4173/index.html');
   await page.evaluate(() => {
     window.debug_game.unlockAllClasses();
     window.debug_game.startRun();

@@ -69,19 +69,11 @@
   let musicElement = null;
   let musicSource = null;
   let musicFilter = null;
-  let musicHighpass = null;
-  let musicBass = null;
-  let musicReverb = null;
-  let musicDryGain = null;
-  let musicWetGain = null;
-  let musicPostFilter = null;
   let musicGain = null;
   let currentMusicTrackIndex = -1;
   let lastMusicTrackIndex = -1;
   let runMusicActive = false;
   let runMusicPaused = false;
-  let runMusicMode = "normal";
-  let runMusicPauseToken = 0;
   let runMusicDeathProgress = 0;
   let musicStopToken = 0;
   let musicTransitionToken = 0;
@@ -174,21 +166,6 @@
     return a + (b - a) * t;
   }
 
-  function createBathroomImpulse(ctx) {
-    const seconds = 0.95;
-    const length = Math.max(1, Math.floor(ctx.sampleRate * seconds));
-    const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
-    for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
-      const data = impulse.getChannelData(channel);
-      for (let i = 0; i < length; i += 1) {
-        const t = i / length;
-        const earlyTileSlap = i < ctx.sampleRate * 0.06 ? 0.55 : 1;
-        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 2.25) * earlyTileSlap;
-      }
-    }
-    return impulse;
-  }
-
   function pickNextMusicTrackIndex() {
     if (MUSIC_TRACKS.length <= 1) {
       return 0;
@@ -244,7 +221,7 @@
     if (!ctx || !masterGain || ctx.state !== "running") {
       return true;
     }
-    if (musicGraphReady && musicSource && musicGain && musicFilter && musicHighpass && musicBass && musicDryGain && musicWetGain && musicPostFilter) {
+    if (musicGraphReady && musicSource && musicGain && musicFilter) {
       return true;
     }
     try {
@@ -253,36 +230,10 @@
       musicFilter.type = "lowpass";
       musicFilter.frequency.value = 18000;
       musicFilter.Q.value = 0.5;
-      musicHighpass = ctx.createBiquadFilter();
-      musicHighpass.type = "highpass";
-      musicHighpass.frequency.value = 20;
-      musicHighpass.Q.value = 0.65;
-      musicBass = ctx.createBiquadFilter();
-      musicBass.type = "peaking";
-      musicBass.frequency.value = 180;
-      musicBass.Q.value = 1.05;
-      musicBass.gain.value = 0;
-      musicReverb = ctx.createConvolver();
-      musicReverb.buffer = createBathroomImpulse(ctx);
-      musicDryGain = ctx.createGain();
-      musicDryGain.gain.value = 1;
-      musicWetGain = ctx.createGain();
-      musicWetGain.gain.value = 0;
-      musicPostFilter = ctx.createBiquadFilter();
-      musicPostFilter.type = "lowpass";
-      musicPostFilter.frequency.value = 18000;
-      musicPostFilter.Q.value = 0.5;
       musicGain = ctx.createGain();
       musicGain.gain.value = 0.0001;
       musicSource.connect(musicFilter);
-      musicFilter.connect(musicHighpass);
-      musicHighpass.connect(musicBass);
-      musicBass.connect(musicDryGain);
-      musicBass.connect(musicReverb);
-      musicReverb.connect(musicWetGain);
-      musicDryGain.connect(musicPostFilter);
-      musicWetGain.connect(musicPostFilter);
-      musicPostFilter.connect(musicGain);
+      musicFilter.connect(musicGain);
       musicGain.connect(masterGain);
       musicGraphReady = true;
     } catch {
@@ -290,12 +241,6 @@
       musicGraphReady = false;
       musicSource = null;
       musicFilter = null;
-      musicHighpass = null;
-      musicBass = null;
-      musicReverb = null;
-      musicDryGain = null;
-      musicWetGain = null;
-      musicPostFilter = null;
       musicGain = null;
       return true;
     }
@@ -309,29 +254,18 @@
     const ctx = audioCtx;
     const now = ctx ? ctx.currentTime : 0;
     const eased = smoothstep01(progress);
-    const muffled = runMusicMode === "muffled";
     const baseMusicGain = getEffectiveMusicGain();
-    const transitionTime = muffled || runMusicMode === "normal" ? 0.62 : 0.28;
-    const gain = Math.max(0.0001, baseMusicGain * (muffled ? 0.16 : 1) * lerp(1, 0.04, eased));
-    const normalCutoff = lerp(18000, 220, eased);
-    const cutoff = muffled ? Math.min(normalCutoff, lerp(460, 280, eased)) : normalCutoff;
-    const q = muffled ? lerp(2.2, 2.9, eased) : lerp(0.6, 2.4, eased);
-    const highpassCutoff = muffled ? 118 : 20;
-    const bassGain = muffled ? 11.5 : 0;
-    const wetGain = muffled ? 0.42 : 0;
-    const postCutoff = muffled ? 360 : 18000;
+    const gain = Math.max(0.0001, baseMusicGain * lerp(1, 0.04, eased));
+    const cutoff = lerp(18000, 220, eased);
+    const q = lerp(0.6, 2.4, eased);
     const playbackRate = lerp(1, 0.16, eased);
     if (ctx && musicGraphReady && musicGain && musicFilter) {
       musicGain.gain.cancelScheduledValues(now);
-      musicGain.gain.setTargetAtTime(gain, now, transitionTime);
+      musicGain.gain.setTargetAtTime(gain, now, 0.18);
       musicFilter.frequency.cancelScheduledValues(now);
-      musicFilter.frequency.setTargetAtTime(cutoff, now, transitionTime);
+      musicFilter.frequency.setTargetAtTime(cutoff, now, 0.2);
       musicFilter.Q.cancelScheduledValues(now);
-      musicFilter.Q.setTargetAtTime(q, now, transitionTime);
-      musicHighpass?.frequency.setTargetAtTime(highpassCutoff, now, transitionTime);
-      musicBass?.gain.setTargetAtTime(bassGain, now, transitionTime);
-      musicWetGain?.gain.setTargetAtTime(wetGain, now, transitionTime);
-      musicPostFilter?.frequency.setTargetAtTime(postCutoff, now, transitionTime);
+      musicFilter.Q.setTargetAtTime(q, now, 0.2);
     } else {
       musicElement.volume = Math.max(0, Math.min(1, gain));
     }
@@ -399,7 +333,6 @@
     musicStopToken += 1;
     runMusicActive = true;
     runMusicPaused = false;
-    runMusicMode = "normal";
     runMusicDeathProgress = 0;
     lastMusicTrackIndex = nextIndex;
     applyRunMusicState(0);
@@ -438,7 +371,6 @@
     const { immediate = false, keepPosition = false } = options;
     runMusicActive = false;
     runMusicPaused = false;
-    runMusicMode = "normal";
     runMusicDeathProgress = 0;
     musicStopToken += 1;
     const stopToken = musicStopToken;
@@ -496,37 +428,15 @@
   }
 
   function pauseRunMusic() {
-    setRunMusicMode("paused");
+    if (!musicElement || !runMusicActive || runMusicPaused) {
+      return;
+    }
+    runMusicPaused = true;
+    musicElement.pause();
   }
 
   function resumeRunMusic() {
-    setRunMusicMode("normal");
-  }
-
-  function setRunMusicMode(mode = "normal") {
-    const nextMode = mode === "paused" || mode === "muffled" ? mode : "normal";
-    runMusicMode = nextMode;
-    runMusicPauseToken += 1;
-    const pauseToken = runMusicPauseToken;
-    if (!musicElement || !runMusicActive) {
-      return;
-    }
-    if (nextMode === "paused") {
-      if (!runMusicPaused) {
-        runMusicPaused = true;
-        const now = audioCtx?.currentTime ?? 0;
-        if (audioCtx && musicGraphReady && musicGain) {
-          musicGain.gain.cancelScheduledValues(now);
-          musicGain.gain.setTargetAtTime(0.0001, now, 0.28);
-        } else {
-          musicElement.volume = 0;
-        }
-        window.setTimeout(() => {
-          if (pauseToken === runMusicPauseToken && runMusicPaused && musicElement) {
-            musicElement.pause();
-          }
-        }, 620);
-      }
+    if (!musicElement || !runMusicActive || !runMusicPaused) {
       return;
     }
     runMusicPaused = false;
@@ -907,7 +817,6 @@
     stopRunMusic,
     pauseRunMusic,
     resumeRunMusic,
-    setRunMusicMode,
     setRunMusicDeathProgress,
   };
 })();

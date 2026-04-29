@@ -1,11 +1,11 @@
-import { chromium, pageUrl, verifyOutputDir, repoRoot } from './playwright-loader.mjs';
+import { chromium } from 'file:///C:/Users/san%20day/.codex/node_modules/playwright/index.mjs';
 import fs from 'fs/promises';
 import path from 'path';
 import http from 'http';
 import { spawn } from 'child_process';
 
-const root = repoRoot;
-const outDir = verifyOutputDir('verify-telemetry-balance');
+const root = process.cwd();
+const outDir = path.join(root, 'output/web-game/verify-telemetry-balance');
 await fs.mkdir(outDir, { recursive: true });
 
 const server = spawn(process.execPath, [path.join(root, 'scripts/serve-static.mjs')], {
@@ -37,7 +37,7 @@ await waitForServer();
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1600, height: 960 } });
 
-await page.goto(pageUrl('index.html'));
+await page.goto('http://localhost:4173/index.html');
 await page.evaluate(() => {
   window.debug_game.clearTelemetryHistory();
   window.debug_game.unlockAllClasses();

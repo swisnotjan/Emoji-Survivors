@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { chromium, pageUrl, verifyOutputDir, repoRoot } from './playwright-loader.mjs';
+import { chromium } from "file:///C:/Users/san%20day/.codex/node_modules/playwright/index.mjs";
 
-const outDir = verifyOutputDir('verify-map-death-pass');
+const outDir = path.resolve("output/web-game/verify-map-death-pass");
 fs.mkdirSync(outDir, { recursive: true });
-const url = pageUrl('index.html');
+const url = "file:///D:\tryings\vibecoding\Games\emoji-survivors/index.html";
 
 const browser = await chromium.launch({ headless: true });
 

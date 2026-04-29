@@ -1,14 +1,14 @@
-import { chromium, pageUrl, verifyOutputDir, repoRoot } from './playwright-loader.mjs';
+import { chromium } from 'file:///C:/Users/san%20day/.codex/node_modules/playwright/index.mjs';
 import fs from 'fs/promises';
 import path from 'path';
 
-const outDir = verifyOutputDir('verify-fixes-pass');
+const outDir = 'D:\tryings\vibecoding\Games\emoji-survivors/output/web-game/verify-fixes-pass';
 await fs.mkdir(outDir, { recursive: true });
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1600, height: 960 } });
-const gameUrl = pageUrl('index.html');
-const labUrl = pageUrl('skill-lab.html');
+const gameUrl = 'file:///D:\tryings\vibecoding\Games\emoji-survivors/index.html';
+const labUrl = 'file:///D:\tryings\vibecoding\Games\emoji-survivors/skill-lab.html';
 
 async function snapshot() {
   return JSON.parse(await page.evaluate(() => window.render_game_to_text()));

@@ -1,11 +1,11 @@
-import { chromium, pageUrl, verifyOutputDir, repoRoot } from './playwright-loader.mjs';
+import { chromium } from 'file:///C:/Users/san%20day/.codex/node_modules/playwright/index.mjs';
 import fs from 'fs/promises';
 import path from 'path';
-const outDir = verifyOutputDir('verify-skill-vfx-fix');
+const outDir = 'D:\tryings\vibecoding\Games\emoji-survivors/output/web-game/verify-skill-vfx-fix';
 await fs.mkdir(outDir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1600, height: 960 } });
-await page.goto(pageUrl('skill-lab.html'));
+await page.goto('file:///D:\tryings\vibecoding\Games\emoji-survivors/skill-lab.html');
 await page.waitForTimeout(1200);
 await page.screenshot({ path: path.join(outDir, 'lab-idle.png') });
 await page.click('#skillLabCast1');

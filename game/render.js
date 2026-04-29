@@ -2188,33 +2188,6 @@ function drawEffects(layer = "base") {
       continue;
     }
 
-    if (effect.kind === "necro-grave") {
-      const alpha = easeOutQuad(lifeRatio);
-      const rise = (1 - lifeRatio) * 10;
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.globalCompositeOperation = "screen";
-      drawSoftBurstParticle(
-        pos.x,
-        pos.y + 7 - rise,
-        18,
-        `rgba(170, 239, 202, ${(0.12 * alpha).toFixed(3)})`,
-        "rgba(66, 176, 120, 0)",
-        "screen"
-      );
-      ctx.globalCompositeOperation = "source-over";
-      ctx.shadowBlur = 14;
-      ctx.shadowColor = `rgba(66, 176, 120, ${(0.45 * alpha).toFixed(3)})`;
-      if (!drawEmojiSprite("🪦", pos.x, pos.y - 7 - rise, effect.size, { alpha })) {
-        ctx.font = `${Math.round(effect.size)}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("🪦", pos.x, pos.y - 7 - rise);
-      }
-      ctx.restore();
-      continue;
-    }
-
     if (effect.kind === "holy-text") {
       ctx.save();
       ctx.globalCompositeOperation = "source-over";
