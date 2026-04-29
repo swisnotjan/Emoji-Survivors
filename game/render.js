@@ -2547,6 +2547,10 @@ function drawEnemies() {
     ctx.filter = "none";
     ctx.shadowBlur = 0;
     ctx.shadowColor = "transparent";
+    const corpsePresentation = enemy.dead && (enemy.preserveCorpseUntil ?? 0) > state.elapsed;
+    if (enemy.dead && !corpsePresentation) {
+      continue;
+    }
 
     const pos = worldToScreen(enemy.x, enemy.y);
     if (!isVisible(pos.x, pos.y, 58)) {
@@ -2556,6 +2560,9 @@ function drawEnemies() {
     const drawX = pos.x;
     const drawY = pos.y - visualHeight;
     const jumpScale = visualHeight > 0 ? 1 + Math.min(0.18, visualHeight / 900) : 1;
+    if (corpsePresentation) {
+      ctx.globalAlpha = 0.9;
+    }
     const font = ENEMY_ARCHETYPES[enemy.type].font;
     const enemyEmojiSize = Math.max(26, (parseInt(font, 10) || 36) + 2);
     if (font !== activeFont) {
@@ -2710,22 +2717,30 @@ function drawAllies() {
     if (!isVisible(pos.x, pos.y, 46)) {
       continue;
     }
-    const alpha = clamp(ally.life / ally.maxLife, 0.3, 1);
+    const lifeRatio = clamp(ally.life / ally.maxLife, 0, 1);
     const allyRawEmoji = ally.emoji;
     const allyEmoji = getDisplayEmoji(allyRawEmoji);
     const tint = ally.tint ?? "rgba(220, 203, 255, {a})";
     const shadowTint = ally.shadowTint ?? "rgba(195, 151, 255, {a})";
     ctx.save();
-    ctx.fillStyle = tint.replace("{a}", alpha.toFixed(3));
+    ctx.fillStyle = tint.replace("{a}", "1");
     ctx.shadowBlur = 12;
-    ctx.shadowColor = shadowTint.replace("{a}", (0.35 + alpha * 0.2).toFixed(3));
+    ctx.shadowColor = shadowTint.replace("{a}", "0.55");
     if (!drawEmojiSprite(allyRawEmoji, pos.x, pos.y, 28, {
-      alpha,
+      alpha: 1,
       shadowBlur: 12,
-      shadowColor: shadowTint.replace("{a}", (0.35 + alpha * 0.2).toFixed(3)),
+      shadowColor: shadowTint.replace("{a}", "0.55"),
     })) {
       ctx.fillText(allyEmoji, pos.x, pos.y);
     }
+    const barWidth = 24;
+    const barX = Math.round(pos.x - barWidth * 0.5);
+    const barY = Math.round(pos.y - 24);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(6, 10, 14, 0.78)";
+    ctx.fillRect(barX, barY, barWidth, 4);
+    ctx.fillStyle = lifeRatio > 0.55 ? "#8cf0c3" : lifeRatio > 0.28 ? "#ffd36b" : "#ff7b94";
+    ctx.fillRect(barX + 1, barY + 1, Math.max(0, Math.round((barWidth - 2) * lifeRatio)), 2);
     ctx.restore();
   }
   ctx.restore();
@@ -2834,6 +2849,7 @@ function drawBossIntroBanner() {
   const alpha = t < 0.18 ? t / 0.18 : t > 0.84 ? (1 - t) / 0.16 : 1;
   const pulse = 0.55 + Math.sin(intro.timer * 11.2) * 0.18;
   const bossName = intro.targetBossName || "Boss";
+  const defeatMode = intro.mode === "defeat";
   ctx.save();
   ctx.globalAlpha = clamp(alpha, 0, 1);
   ctx.textAlign = "center";
@@ -2849,9 +2865,9 @@ function drawBossIntroBanner() {
     ctx.shadowColor = "rgba(255, 161, 110, 0.62)";
   }
   ctx.font = '800 18px "Trebuchet MS", "Segoe UI", sans-serif';
-  ctx.fillText("BOSS APPROACHING", viewWidth * 0.5, y - 28);
+  ctx.fillText(defeatMode ? "BOSS SLAIN" : "BOSS APPROACHING", viewWidth * 0.5, y - 28);
   ctx.font = '900 48px "Trebuchet MS", "Segoe UI", sans-serif';
-  ctx.fillText(bossName.toUpperCase(), viewWidth * 0.5, y + 8);
+  ctx.fillText((defeatMode ? `${bossName} FALLS` : bossName).toUpperCase(), viewWidth * 0.5, y + 8);
   ctx.restore();
 }
 
@@ -2990,12 +3006,15 @@ function getCameraState() {
   if (!intro?.active) {
     return (_frameCameraState = { worldX: playerX, worldY: playerY, centerX, centerY, zoom: baseZoom });
   }
-  const boss = state.enemies.find((enemy) => !enemy.dead && enemy.id === intro.targetEnemyId && enemy.isBoss);
-  if (!boss) {
+  const boss = state.enemies.find((enemy) => enemy.id === intro.targetEnemyId && enemy.isBoss);
+  const focusX = boss?.x ?? intro.focusX ?? playerX;
+  const focusY = boss?.y ?? intro.focusY ?? playerY;
+  if (!boss && intro.mode !== "defeat") {
     return (_frameCameraState = { worldX: playerX, worldY: playerY, centerX, centerY, zoom: baseZoom });
   }
   const t = clamp(intro.timer / Math.max(0.0001, intro.duration), 0, 1);
-  const zoomInPeak = 0.34;
+  const defeatMode = intro.mode === "defeat";
+  const zoomInPeak = defeatMode ? 0.28 : 0.34;
   const approachEnd = 0.46;
   const holdEnd = 0.82;
   const easeOutCubic = (v) => 1 - Math.pow(1 - v, 3);
@@ -3010,8 +3029,8 @@ function getCameraState() {
   }
   const zoom = lerp(baseZoom, zoomInPeak, travel);
   return (_frameCameraState = {
-    worldX: lerp(playerX, boss.x, travel),
-    worldY: lerp(playerY, boss.y, travel),
+    worldX: lerp(playerX, focusX, travel),
+    worldY: lerp(playerY, focusY, travel),
     centerX,
     centerY,
     zoom,

@@ -116,7 +116,7 @@ function createInitialState(classId = "wind") {
       bloodMarkedReduction: classId === "blood" ? 0.03 : 0,
       bloodCloseRangeBonus: classId === "blood" ? 0.06 : 0,
       bloodRiteLifestealBonus: classId === "blood" ? 0.10 : 0,
-      frozenDamageMultiplier: classId === "frost" ? 3.0 : 1.0,
+      frozenDamageMultiplier: classId === "frost" ? 3.35 : 1.0,
       lastCritTimer: 0,
       lastCritSource: null,
       thrallLifestealPerHit: 0,
@@ -215,8 +215,12 @@ function createInitialState(classId = "wind") {
       active: false,
       timer: 0,
       duration: 2.25,
+      mode: "intro",
       targetEnemyId: null,
       targetBossName: "",
+      focusX: 0,
+      focusY: 0,
+      rewardPayload: null,
     },
     pause: {
       manual: false,
@@ -225,6 +229,7 @@ function createInitialState(classId = "wind") {
       helpPanel: false,
       devMenu: false,
       codexTab: "build",
+      upgradesOrigin: "direct",
     },
     dev: {
       activeTab: "skills",
@@ -282,6 +287,7 @@ function createInitialState(classId = "wind") {
       fpsSmooth: 60,
       fpsTimer: 0,
       tier: 0,
+      tierRecoverAt: 0,
       renderScaleTarget: 1,
       massSkillQueue: [],
       massSkillFrameBudget: {
@@ -1187,7 +1193,15 @@ function closeHowToPlay() {
 function shouldPauseRunMusic() {
   return state.running
     && !state.runEnd.active
-    && (state.pause.manual || state.pause.focus || state.pause.upgradesPanel || state.pause.helpPanel || state.pause.devMenu);
+    && (
+      state.pause.manual
+      || state.pause.focus
+      || state.pause.upgradesPanel
+      || state.pause.helpPanel
+      || state.pause.devMenu
+      || state.levelUp.active
+      || state.bossReward.active
+    );
 }
 
 function syncMusicPauseState() {
@@ -1692,13 +1706,13 @@ function bindEvents() {
     resetTouchControls();
     hideSkillTooltip();
     hideClassHoverTooltip();
-    if (state.running && !state.levelUp.active && !state.pause.upgradesPanel) {
+    if (state.running && !state.levelUp.active && !state.bossReward.active && !isPauseActive()) {
       setPause("focus", true);
     }
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden && state.running && !state.levelUp.active && !state.pause.upgradesPanel) {
+    if (document.hidden && state.running && !state.levelUp.active && !state.bossReward.active && !isPauseActive()) {
       setPause("focus", true);
     }
   });
@@ -2202,7 +2216,20 @@ function updateFps(frameTime) {
 
   perf.fpsTimer = 0.22;
   perf.fpsDisplay = Math.max(0, Math.round(perf.fpsSmooth));
-  perf.tier = getPerformanceTier();
+  const nextTier = getPerformanceTier();
+  if (nextTier > perf.tier) {
+    perf.tier = nextTier;
+    perf.tierRecoverAt = state.elapsed + 0.9;
+  } else if (nextTier < perf.tier) {
+    if (state.elapsed >= (perf.tierRecoverAt ?? 0)) {
+      perf.tier = nextTier;
+      if (nextTier > 0) {
+        perf.tierRecoverAt = state.elapsed + 0.45;
+      }
+    }
+  } else if (nextTier > 0) {
+    perf.tierRecoverAt = Math.max(perf.tierRecoverAt ?? 0, state.elapsed + 0.24);
+  }
   applyRenderResolution();
   const label = `FPS ${perf.fpsDisplay}`;
   if (state.hudCache.fps !== label) {
@@ -2742,7 +2769,7 @@ function update(dt) {
   let simDt = dt;
   if (state.bossIntro.active) {
     updateBossIntroCinematic(dt);
-    simDt *= 0.14;
+    simDt *= state.bossIntro.mode === "defeat" ? 0.08 : 0.14;
   }
 
   state.tick += 1;
@@ -3979,7 +4006,7 @@ function castPermafrostSeal(mastery) {
     maxLife: 2.9 * (1 + state.player.skillDurationMultiplier),
     armTime: 0.65,
     radius: 132 * (1 + state.player.skillAreaMultiplier + mastery * 0.08),
-    damage: (8 + mastery * 4) * state.player.skillDamageMultiplier,
+    damage: (10 + mastery * 5) * state.player.skillDamageMultiplier,
     burstDone: false,
     color: "rgba(186, 235, 255, {a})",
     secondaryColor: "rgba(76, 156, 236, {a})",
@@ -4008,7 +4035,7 @@ function castCrystalSpear(mastery) {
     vy: (dy / length) * (620 + mastery * 40),
     radius: 6.2,
     renderRadius: 48,
-    damage: (22 + mastery * 16) * state.player.skillDamageMultiplier,
+    damage: (28 + mastery * 20) * state.player.skillDamageMultiplier,
     life: 1.35,
     pierce: 2 + mastery,
     color: "#dff6ff",
@@ -4152,24 +4179,26 @@ function castGraveCall(mastery) {
   const fallbackCount = nearbyCorpses.length === 0 ? 1 : 0;
   for (const corpse of nearbyCorpses) {
     corpse.life = 0;
-    spawnNecroThrall(corpse.x, corpse.y, {
+    spawnNecroGrave(corpse.x, corpse.y, {
       sourceType: corpse.type,
       radius: Math.max(12, corpse.radius * 0.72),
       speed: 160 + mastery * 8,
       damage: 12 + mastery * 2,
-      life: 14 + mastery * 2,
+      thrallLife: 14 + mastery * 2,
+      size: Math.max(28, corpse.radius * 2.2),
     });
   }
   for (let index = 0; index < fallbackCount; index += 1) {
     const angle = (index / Math.max(1, fallbackCount)) * Math.PI * 2 + randRange(-0.22, 0.22);
-    spawnNecroThrall(
+    spawnNecroGrave(
       state.player.x + Math.cos(angle) * randRange(24, 56),
       state.player.y + Math.sin(angle) * randRange(24, 56),
       {
         sourceType: "phantom",
         speed: 162 + mastery * 8,
         damage: 10 + mastery * 2,
-        life: 11 + mastery * 2,
+        thrallLife: 11 + mastery * 2,
+        size: 28 + mastery * 2,
       }
     );
   }
@@ -4288,14 +4317,14 @@ function spawnEnemies(dt) {
   );
   let dynamicInterval =
     director.baseInterval - Math.min(1, pressure) * (director.baseInterval - director.minInterval);
-  dynamicInterval *= Math.max(0.62, 1 - Math.min(0.34, latePressure * 0.28));
+  dynamicInterval *= Math.max(0.56, 1 - Math.min(0.42, latePressure * 0.32));
   if (bossActive) {
     dynamicInterval *= SPAWN_DIRECTOR_CONFIG.bossSpawnIntervalMultiplier;
   }
   const earlyCapScale = Math.min(1, state.elapsed / SPAWN_DIRECTOR_CONFIG.earlyCapRampTime);
   const earlyCapBase = SPAWN_DIRECTOR_CONFIG.earlyCapMin + (director.maxEnemiesOnField - SPAWN_DIRECTOR_CONFIG.earlyCapMin) * earlyCapScale;
-  const dynamicMaxEnemies = Math.round(earlyCapBase * (1 + Math.min(0.55, latePressure * 0.34)));
-  const dynamicBossAmbientCap = Math.round(SPAWN_DIRECTOR_CONFIG.bossAmbientCap * (1 + Math.min(0.4, latePressure * 0.22)));
+  const dynamicMaxEnemies = Math.round(earlyCapBase * (1 + Math.min(0.95, latePressure * 0.42)));
+  const dynamicBossAmbientCap = Math.round(SPAWN_DIRECTOR_CONFIG.bossAmbientCap * (1 + Math.min(0.8, latePressure * 0.34)));
 
   director.timer -= dt;
 
@@ -4321,7 +4350,10 @@ function spawnEnemies(dt) {
     }
     const anchor = pickSpawnPoint();
 
-    const spawnCount = bossActive ? 1 : plan.count;
+    let spawnCount = bossActive ? 1 : plan.count;
+    if (!bossActive && latePressure > 0.8 && (plan.type === "grunt" || plan.type === "runner")) {
+      spawnCount += 1;
+    }
     for (let i = 0; i < spawnCount; i += 1) {
       if (state.enemies.length >= dynamicMaxEnemies) {
         return;
@@ -4514,8 +4546,36 @@ function startBossIntroCinematic(boss) {
   const intro = state.bossIntro;
   intro.active = true;
   intro.timer = 0;
+  intro.mode = "intro";
   intro.targetEnemyId = boss.id;
   intro.targetBossName = boss.bossName ?? boss.name ?? "Boss";
+  intro.focusX = boss.x;
+  intro.focusY = boss.y;
+  intro.rewardPayload = null;
+}
+
+function startBossDefeatCinematic(enemy) {
+  if (!enemy || state.runEnd.active || state.levelUp.active || state.bossReward.active) {
+    return false;
+  }
+  const intro = state.bossIntro;
+  intro.active = true;
+  intro.timer = 0;
+  intro.duration = 2.1;
+  intro.mode = "defeat";
+  intro.targetEnemyId = enemy.id;
+  intro.targetBossName = enemy.bossName ?? enemy.name ?? "Boss";
+  intro.focusX = enemy.x;
+  intro.focusY = enemy.y;
+  enemy.preserveCorpseUntil = Math.max(enemy.preserveCorpseUntil ?? 0, state.elapsed + intro.duration + 0.08);
+  intro.rewardPayload = {
+    type: enemy.type,
+    bossName: enemy.bossName ?? enemy.name ?? "Boss",
+  };
+  pressedActions.clear();
+  state.cameraShake.timer = Math.max(state.cameraShake.timer, 0.36);
+  state.cameraShake.power = Math.max(state.cameraShake.power, 8.5);
+  return true;
 }
 
 function updateBossIntroCinematic(dt) {
@@ -4524,12 +4584,27 @@ function updateBossIntroCinematic(dt) {
     return;
   }
   intro.timer += dt;
-  const boss = state.enemies.find((enemy) => !enemy.dead && enemy.id === intro.targetEnemyId && enemy.isBoss);
-  if (!boss || intro.timer >= intro.duration) {
+  const boss = intro.targetEnemyId == null
+    ? null
+    : state.enemies.find((enemy) => enemy.id === intro.targetEnemyId && enemy.isBoss);
+  if (boss) {
+    intro.focusX = boss.x;
+    intro.focusY = boss.y;
+  }
+  if ((!boss && intro.mode === "intro") || intro.timer >= intro.duration) {
+    const rewardPayload = intro.mode === "defeat" ? intro.rewardPayload : null;
     intro.active = false;
     intro.timer = 0;
+    intro.duration = 2.25;
+    intro.mode = "intro";
     intro.targetEnemyId = null;
     intro.targetBossName = "";
+    intro.focusX = 0;
+    intro.focusY = 0;
+    intro.rewardPayload = null;
+    if (rewardPayload) {
+      openBossRewardChoices(rewardPayload);
+    }
   }
 }
 
@@ -4593,6 +4668,7 @@ function createEnemy(enemyType, anchor, index, totalCount, options = {}) {
     maxHp,
     hp: maxHp,
     hpScale,
+    preserveCorpseUntil: 0,
     touchDamage: profile.touchDamage,
     reward: profile.reward,
     xpReward: profile.xp,
@@ -6278,31 +6354,121 @@ function updateAllies(dt) {
       ally.dead = true;
       continue;
     }
-    const target = findNearestEnemy(ally.x, ally.y, 360);
-    let moveX, moveY;
+    const dxToPlayer = state.player.x - ally.x;
+    const dyToPlayer = state.player.y - ally.y;
+    const distToPlayer = Math.hypot(dxToPlayer, dyToPlayer);
+    const hardLeash = ally.kind === "thrall" ? 760 : 999999;
+    const softLeash = ally.kind === "thrall" ? 420 : 999999;
+    const leashRelease = ally.kind === "thrall" ? 280 : softLeash;
+    if (distToPlayer > hardLeash) {
+      const angle = Math.atan2(dyToPlayer, dxToPlayer) + randRange(-0.45, 0.45);
+      ally.x = state.player.x + Math.cos(angle) * randRange(26, 52);
+      ally.y = state.player.y + Math.sin(angle) * randRange(26, 52);
+      ally.returning = false;
+      ally.targetEnemyId = null;
+      ally.retargetTimer = 0;
+      ally.steerX = 0;
+      ally.steerY = 0;
+    }
+    if (ally.kind === "thrall") {
+      if (ally.returning) {
+        if (distToPlayer <= leashRelease) {
+          ally.returning = false;
+          ally.targetEnemyId = null;
+          ally.retargetTimer = 0;
+        }
+      } else if (distToPlayer > softLeash) {
+        ally.returning = true;
+        ally.targetEnemyId = null;
+        ally.retargetTimer = 0;
+      }
+    }
+    const leashing = Boolean(ally.returning);
+    let target = null;
+    if (!leashing) {
+      ally.retargetTimer = Math.max(0, (ally.retargetTimer ?? 0) - dt);
+      if (ally.targetEnemyId != null) {
+        target = state.enemies.find((enemy) => !enemy.dead && enemy.id === ally.targetEnemyId) ?? null;
+        if (target) {
+          const targetDistance = Math.hypot(target.x - ally.x, target.y - ally.y);
+          if (targetDistance > 390) {
+            target = null;
+          }
+        }
+      }
+      if (!target || ally.retargetTimer <= 0) {
+        target = findNearestEnemy(ally.x, ally.y, 360);
+        ally.targetEnemyId = target?.id ?? null;
+        ally.retargetTimer = target ? 0.12 + ((ally.id % 3) * 0.02) : 0.08;
+      }
+    } else {
+      ally.targetEnemyId = null;
+      ally.retargetTimer = 0;
+    }
+    let desiredMoveX = 0;
+    let desiredMoveY = 0;
+    let speedMultiplier = leashing ? 1.7 : 1;
     if (target) {
       const dx = target.x - ally.x;
       const dy = target.y - ally.y;
       const length = Math.hypot(dx, dy) || 1;
-      const drift = 0.18 * Math.sin(state.elapsed * 2.6 + ally.orbitSeed);
-      moveX = dx / length + (-dy / length) * drift;
-      moveY = dy / length + (dx / length) * drift;
+      const nx = dx / length;
+      const ny = dy / length;
+      const tangentX = -ny;
+      const tangentY = nx;
+      const desiredRange = ally.radius + target.radius + (ally.kind === "thrall" ? 10 : 4);
+      const engageBand = 12;
+      const rangeError = length - desiredRange;
+      const orbitDirection = Math.sin(ally.orbitSeed * 1.73) >= 0 ? 1 : -1;
+      if (rangeError > engageBand) {
+        const drift = 0.22 * Math.sin(state.elapsed * 2.8 + ally.orbitSeed);
+        desiredMoveX = nx + tangentX * drift * orbitDirection;
+        desiredMoveY = ny + tangentY * drift * orbitDirection;
+      } else if (rangeError < -engageBand) {
+        desiredMoveX = -nx * 0.72 + tangentX * 0.48 * orbitDirection;
+        desiredMoveY = -ny * 0.72 + tangentY * 0.48 * orbitDirection;
+        speedMultiplier *= 0.82;
+      } else {
+        const orbitDrift = 0.74 + 0.12 * Math.sin(state.elapsed * 3.2 + ally.orbitSeed);
+        const settle = clamp(rangeError / Math.max(1, engageBand * 1.6), -0.22, 0.22);
+        desiredMoveX = tangentX * orbitDrift * orbitDirection + nx * settle;
+        desiredMoveY = tangentY * orbitDrift * orbitDirection + ny * settle;
+        speedMultiplier *= ally.hitCooldown > 0 ? 0.28 : 0.46;
+      }
     } else {
-      const dx = state.player.x - ally.x;
-      const dy = state.player.y - ally.y;
+      const orbitRadius = ally.kind === "thrall" ? 34 + (ally.id % 3) * 14 : 18;
+      const anchorX = state.player.x + Math.cos(state.elapsed * 0.7 + ally.orbitSeed) * orbitRadius;
+      const anchorY = state.player.y + Math.sin(state.elapsed * 0.7 + ally.orbitSeed) * orbitRadius;
+      const dx = anchorX - ally.x;
+      const dy = anchorY - ally.y;
       const dist = Math.hypot(dx, dy);
-      if (dist < 30) {
+      if (dist < 12) {
+        ally.steerX = 0;
+        ally.steerY = 0;
         continue;
       }
-      moveX = dx / dist;
-      moveY = dy / dist;
+      desiredMoveX = dx / dist;
+      desiredMoveY = dy / dist;
+      if (dist < 28) {
+        speedMultiplier *= 0.38;
+      } else if (dist < 46) {
+        speedMultiplier *= 0.62;
+      }
     }
-    const moveLen = Math.hypot(moveX, moveY) || 1;
+    const steerBlend = clamp(dt * 10, 0.18, 0.72);
+    ally.steerX = lerp(ally.steerX ?? 0, desiredMoveX, steerBlend);
+    ally.steerY = lerp(ally.steerY ?? 0, desiredMoveY, steerBlend);
+    const moveLen = Math.hypot(ally.steerX, ally.steerY);
+    if (moveLen < 0.045) {
+      ally.steerX = 0;
+      ally.steerY = 0;
+      continue;
+    }
     const requiemBonus = getRequiemFieldBonusAt(ally.x, ally.y);
     moveCircleEntity(
       ally,
-      (moveX / moveLen) * ally.speed * requiemBonus.speedMultiplier * dt,
-      (moveY / moveLen) * ally.speed * requiemBonus.speedMultiplier * dt,
+      (ally.steerX / moveLen) * ally.speed * requiemBonus.speedMultiplier * speedMultiplier * dt,
+      (ally.steerY / moveLen) * ally.speed * requiemBonus.speedMultiplier * speedMultiplier * dt,
       ally.radius,
       { water: false, solids: false }
     );
@@ -6325,13 +6491,16 @@ function resolveAllySeparation() {
       const dx = allyB.x - allyA.x;
       const dy = allyB.y - allyA.y;
       const distance = Math.hypot(dx, dy) || 0.0001;
-      const minDistance = allyA.radius + allyB.radius;
+      const pairPadding = allyA.kind === "thrall" && allyB.kind === "thrall" ? 8 : 2;
+      const minDistance = allyA.radius + allyB.radius + pairPadding;
       if (distance >= minDistance) {
         continue;
       }
       const overlap = minDistance - distance;
-      const pushX = (dx / distance) * overlap * 0.5;
-      const pushY = (dy / distance) * overlap * 0.5;
+      const nx = distance > 0.001 ? dx / distance : Math.cos(allyA.orbitSeed - allyB.orbitSeed);
+      const ny = distance > 0.001 ? dy / distance : Math.sin(allyA.orbitSeed - allyB.orbitSeed);
+      const pushX = nx * overlap * 0.58;
+      const pushY = ny * overlap * 0.58;
       allyA.x -= pushX;
       allyA.y -= pushY;
       allyB.x += pushX;
@@ -6543,7 +6712,7 @@ function applyEnemyBurn(enemy, strength, duration) {
 
 function applyEnemyChill(enemy, amount, duration) {
   const potency = 1 + state.player.statusPotency;
-  const frostBossControlFloor = state.player.classId === "frost" && enemy.isBoss ? 0.52 : 0;
+  const frostBossControlFloor = state.player.classId === "frost" && enemy.isBoss ? 0.6 : 0;
   const controlMultiplier = Math.max(frostBossControlFloor, 1 - enemy.controlResist);
   const effectiveAmount = amount * potency * controlMultiplier;
   enemy.chillStacks = Math.min(enemy.isBoss ? 5 : 6, enemy.chillStacks + effectiveAmount);
@@ -6552,11 +6721,11 @@ function applyEnemyChill(enemy, amount, duration) {
   enemy.slowTimer = Math.max(enemy.slowTimer, 0.5 * state.player.statusDurationMultiplier);
   setEnemyStatusFlash(enemy, "chill", 0.45);
 
-  const freezeThreshold = enemy.isBoss ? 5.5 : 4.0;
+  const freezeThreshold = enemy.isBoss ? 5.0 : 4.0;
   if (enemy.chillStacks >= freezeThreshold) {
     enemy.chillStacks = 0;
     enemy.chillDecayTimer = 0;
-    const baseFreezeDuration = enemy.isBoss ? 0.55 : 1.5;
+    const baseFreezeDuration = enemy.isBoss ? 0.72 : 1.5;
     const resistScale = enemy.isBoss ? Math.max(0.24, 1 - enemy.freezeResist) : 1;
     enemy.freezeTimer = Math.max(enemy.freezeTimer, baseFreezeDuration * (1 - enemy.controlResist) * resistScale);
     if (enemy.isBoss) {
@@ -6959,10 +7128,37 @@ function spawnNecroThrall(x, y, spec = {}) {
     maxLife: life,
     hitCooldown: 0,
     orbitSeed: Math.random() * Math.PI * 2,
+    steerX: 0,
+    steerY: 0,
+    returning: false,
+    targetEnemyId: null,
+    retargetTimer: 0,
     dead: false,
   });
   trackArchiveEvent("thrall_spawned");
   return true;
+}
+
+function spawnNecroGrave(x, y, spec = {}) {
+  const life = clamp(spec.life ?? 1.08, 0.84, 1.6);
+  const size = clamp(spec.size ?? 30, 26, 42);
+  pushEffect({
+    kind: "necro-grave",
+    x,
+    y,
+    life,
+    maxLife: life,
+    size,
+    renderLayer: "top",
+    spawnedThrall: false,
+    thrallSpec: {
+      sourceType: spec.sourceType ?? "phantom",
+      radius: spec.radius,
+      speed: spec.speed,
+      damage: spec.damage,
+      life: spec.thrallLife,
+    },
+  });
 }
 
 function maybeRaiseThrall(enemy) {
@@ -6978,12 +7174,13 @@ function maybeRaiseThrall(enemy) {
   if (Math.random() > chance) {
     return;
   }
-  spawnNecroThrall(enemy.x, enemy.y, {
+  spawnNecroGrave(enemy.x, enemy.y, {
     sourceType: enemy.type,
     radius: Math.max(12, enemy.radius * 0.76),
     speed: Math.max(160, enemy.speed * 0.88),
     damage: 10 + enemy.radius * 0.10,
-    life: 14,
+    thrallLife: 14,
+    size: Math.max(28, enemy.radius * 2.1),
   });
 }
 
@@ -7140,7 +7337,7 @@ function onEnemyDefeated(enemy, source = "unknown") {
     trackArchiveEvent("boss_defeated", { bossType: enemy.type, enemy, source });
     state.bossDirector.encounterIndex += 1;
     scheduleNextBossEncounter(state.elapsed);
-    openBossRewardChoices(enemy);
+    startBossDefeatCinematic(enemy);
     return;
   }
   if (!isSkillSoundSource(source)) {
@@ -7214,7 +7411,7 @@ function cleanupDeadEntities() {
   state.projectiles = state.projectiles.filter((projectile) => !projectile.dead);
   state.enemyAttacks = state.enemyAttacks.filter((attack) => !attack.dead);
   state.pickups = state.pickups.filter((pickup) => !pickup.dead);
-  state.enemies = state.enemies.filter((enemy) => !enemy.dead);
+  state.enemies = state.enemies.filter((enemy) => !enemy.dead || (enemy.preserveCorpseUntil ?? 0) > state.elapsed);
 }
 
 function applyZoneTick(effect, enemy, distanceRatio = 1) {
@@ -7696,6 +7893,14 @@ function updateEffects(dt) {
       continue;
     }
 
+    if (effect.kind === "necro-grave") {
+      if (!effect.spawnedThrall && effect.life <= effect.maxLife * 0.06) {
+        effect.spawnedThrall = true;
+        spawnNecroThrall(effect.x, effect.y, effect.thrallSpec ?? {});
+      }
+      continue;
+    }
+
     if (effect.kind === "grave-call") {
       continue;
     }
@@ -7909,10 +8114,7 @@ function startLevelUpPauseIfNeeded() {
     return;
   }
 
-  if (state.pause.upgradesPanel) {
-    closeUpgradesPanel();
-  }
-
+  dismissPauseSurfacesForRewardPrompt();
   state.levelUp.active = true;
   pressedActions.clear();
   openLevelUpChoices();
@@ -7939,12 +8141,14 @@ function openLevelUpChoices() {
     state.progression.pendingLevelUps = Math.max(0, state.progression.pendingLevelUps - 1);
     state.levelUp.active = false;
     levelUpOverlay.classList.add("hidden");
+    syncMusicPauseState();
     return;
   }
 
   state.levelUp.rewardLevel = rewardLevel;
   state.levelUp.category = rewardKind;
   state.levelUp.options = options;
+  dismissPauseSurfacesForRewardPrompt();
   levelUpTitle.textContent = `Level ${rewardLevel}`;
   levelUpKicker.textContent = getLevelUpKicker(rewardKind);
   levelUpSubtitle.textContent = getLevelUpSubtitle(rewardKind);
@@ -7953,6 +8157,16 @@ function openLevelUpChoices() {
   levelUpOverlay.classList.remove("hidden");
   retriggerLevelUpFlash();
   retriggerEnterAnimation(levelUpOverlay, levelUpCard);
+  syncMusicPauseState();
+}
+
+function dismissPauseSurfacesForRewardPrompt() {
+  state.pause.manual = false;
+  state.pause.upgradesPanel = false;
+  state.pause.devMenu = false;
+  state.pause.codexTab = "build";
+  clearPauseMenuEndRunConfirm();
+  refreshPauseOverlay();
 }
 
 function autoResolvePendingLevelUps() {
@@ -8652,6 +8866,7 @@ function applyUpgradeOption(option, config = {}) {
 
   if (deferNextOpen) {
     updateHud(true);
+    syncMusicPauseState();
     return;
   }
 
@@ -8669,6 +8884,7 @@ function applyUpgradeOption(option, config = {}) {
   levelUpOverlay.classList.remove("is-ascendant");
 
   updateHud(true);
+  syncMusicPauseState();
 }
 
 function openBossRewardChoices(enemy) {
@@ -8687,6 +8903,7 @@ function openBossRewardChoices(enemy) {
   state.bossReward.bossType = enemy.type;
   state.bossReward.bossName = enemy.bossName;
   state.bossReward.options = options;
+  dismissPauseSurfacesForRewardPrompt();
   pressedActions.clear();
 
   bossRewardCard.dataset.theme = enemy.type;
@@ -8696,7 +8913,9 @@ function openBossRewardChoices(enemy) {
   retriggerBossRewardFlash();
   bossRewardOverlay.classList.remove("hidden");
   retriggerEnterAnimation(bossRewardOverlay, bossRewardCard);
+  syncMusicPauseState();
   updateHud(true);
+  syncMusicPauseState();
 }
 
 function pickAutoBossRewardOption(options) {
@@ -8770,6 +8989,7 @@ function applyBossRewardOption(option) {
   state.bossReward.options = [];
   bossRewardOverlay.classList.add("hidden");
   bossRewardCard.dataset.theme = "";
+  syncMusicPauseState();
   updateHud(true);
   startLevelUpPauseIfNeeded();
 }
@@ -8795,6 +9015,7 @@ function clearPause() {
   state.pause.helpPanel = false;
   state.pause.devMenu = false;
   state.pause.codexTab = "build";
+  state.pause.upgradesOrigin = "direct";
   clearPauseMenuEndRunConfirm();
   howToPlayOverlay?.classList.add("hidden");
   stopHowtoPickupPreviewAnimation();
@@ -8845,6 +9066,9 @@ function refreshPauseOverlay() {
     menuKicker.classList.add("hidden");
     pauseTitle.textContent = "Developer Menu";
     pauseSubtitle.textContent = "Open with / on any layout. Use tabs to inspect upgrades, spawn enemies, tune the character, or switch class. Press / or Esc to resume.";
+    if (closeUpgradesButton) {
+      closeUpgradesButton.textContent = "Resume";
+    }
     return;
   }
 
@@ -8860,6 +9084,9 @@ function refreshPauseOverlay() {
   menuKicker.textContent = "Codex";
   pauseTitle.textContent = "Upgrades";
   pauseSubtitle.textContent = "Review your build and return stronger.";
+  if (closeUpgradesButton) {
+    closeUpgradesButton.textContent = state.pause.upgradesOrigin === "menu" || state.pause.focus ? "Back" : "Resume";
+  }
 }
 
 function toggleUpgradesPanel() {
@@ -8879,12 +9106,14 @@ function openUpgradesPanel() {
   if (!state.running || state.levelUp.active || state.bossReward.active) {
     return;
   }
+  state.pause.upgradesOrigin = isPauseActive() ? "menu" : "direct";
   state.pause.devMenu = false;
   state.pause.upgradesPanel = true;
   state.pause.manual = true;
   state.pause.codexTab = "build";
   pressedActions.clear();
   refreshPauseOverlay();
+  syncMusicPauseState();
 }
 
 function openPauseMenu() {
@@ -8899,6 +9128,13 @@ function openPauseMenu() {
 }
 
 function closeUpgradesPanel() {
+  const returnToMenu = state.pause.upgradesOrigin === "menu" || state.pause.focus;
+  state.pause.upgradesPanel = false;
+  state.pause.upgradesOrigin = "direct";
+  if (returnToMenu) {
+    openPauseMenu();
+    return;
+  }
   clearPause();
 }
 

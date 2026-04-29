@@ -14,11 +14,11 @@
   },
   enemyScaling: {
     startMinute: 2,
-    regularLinear: 0.022,
-    regularQuadratic: 0.0015,
-    bossLinear: 0.022,
-    bossQuadratic: 0.0013,
-    bossEncounterBonus: 0.06,
+    regularLinear: 0.045,
+    regularQuadratic: 0.0035,
+    bossLinear: 0.06,
+    bossQuadratic: 0.0048,
+    bossEncounterBonus: 0.2,
   },
   majorUpgrades: {
     pairWeights: {
@@ -121,10 +121,10 @@
   spawnDirector: {
     baseInterval: 1.08,
     minInterval: 0.20,
-    maxEnemiesOnField: 130,
+    maxEnemiesOnField: 160,
     bossSpawnIntervalMultiplier: 5.8,
-    bossAmbientCap: 22,
-    earlyCapMin: 55,
+    bossAmbientCap: 28,
+    earlyCapMin: 60,
     earlyCapRampTime: 140,
   },
   spawnRoster: [

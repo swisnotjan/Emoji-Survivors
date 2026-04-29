@@ -1,0 +1,13 @@
+6877c959b46085fa2891c12fdfca8429a75cd438 refs/heads/backup/main-with-extra
+a04620ea9692fb0ace6084fa5b2ec16f91e7ffba refs/heads/claude/confident-moore-7c407d
+b736040a4b5ca5cc94bca43a191e712215befd69 refs/heads/claude/ecstatic-wilbur-b9053b
+3b5c424f672319b50b74f69b54b0f8ad6e9f3674 refs/heads/claude/keen-meitner-91db40
+a04620ea9692fb0ace6084fa5b2ec16f91e7ffba refs/heads/claude/kind-goldwasser-4b80a3
+5679a63be49b7bda1cfad5fc742b34a43004aae1 refs/heads/claude/nice-bardeen-eb7c79
+59f7b392d47e53d98afed4620daeeea11f14d9d3 refs/heads/claude/pedantic-banzai-6c6cec
+436e1bfc659ee9aa746491a3906bce6f3ce9c2cd refs/heads/claude/reverent-ellis-a1a3a6
+3b5c424f672319b50b74f69b54b0f8ad6e9f3674 refs/heads/codex/fps-profiler-optimization
+59f7b392d47e53d98afed4620daeeea11f14d9d3 refs/heads/codex/fps-profiler-optimization-pedantic
+5679a63be49b7bda1cfad5fc742b34a43004aae1 refs/heads/codex/minor-tweaks-90fps-upgrades
+11bcc8b71b485b45046a87a4fc1d4eddd66b5908 refs/heads/codex/ui-retro-pixel-refresh
+59f7b392d47e53d98afed4620daeeea11f14d9d3 refs/heads/main
