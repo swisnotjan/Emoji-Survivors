@@ -31,13 +31,10 @@ const TERRAIN_TILE_CACHE_PRUNE_BATCH = 4096;
 const TERRAIN_CACHE_MIN_TILE_X = Math.round(WORLD.left / TERRAIN_TILE_SIZE);
 const TERRAIN_CACHE_MIN_TILE_Y = Math.round(WORLD.top / TERRAIN_TILE_SIZE);
 const TERRAIN_CACHE_TILES_X = Math.round((WORLD.right - WORLD.left) / TERRAIN_TILE_SIZE) + 1;
-const TERRAIN_CHUNK_SIZE = TERRAIN_TILE_SIZE * 32;
-const TERRAIN_CHUNK_CACHE_MAX_ENTRIES = 96;
 const PARTICLE_SPRITE_CACHE = new Map();
 const SOFT_BURST_SPRITE_CACHE = new Map();
-const TERRAIN_CHUNK_CACHE = new Map();
-const TERRAIN_CHUNK_PREWARM_QUEUE = [];
-const TERRAIN_CHUNK_PREWARM_KEYS = new Set();
+const TERRAIN_CACHE_CANVAS = document.createElement("canvas");
+const TERRAIN_CACHE_CTX = TERRAIN_CACHE_CANVAS.getContext("2d", { alpha: false });
 const GAME_CONFIG = window.GAME_CONFIG ?? {};
 const TERRAIN_PALETTE = GAME_CONFIG.terrainPalette ?? {
   grass: ["#2a472b", "#3e603f", "#4f7950"],
@@ -89,95 +86,12 @@ const EMOJI_ATLAS = {
   cellSize: 64,
   url: "assets/win11-emoji-atlas.png",
 };
-const EMOJI_CUSTOM_SPRITE_CACHE = new Map();
-const SKIN_TONE_EMOJI_SPRITES = {
-  "\uD83E\uDDD9\uD83C\uDFFB\u200D\u2642\uFE0F": { base: "\uD83E\uDDD9", color: "#f4c6a3" },
-  "\uD83E\uDDDD\uD83C\uDFFB\u200D\u2642\uFE0F": { base: "\uD83E\uDDDD", color: "#f4c6a3" },
-  "\uD83E\uDDDD\uD83C\uDFFF": { base: "\uD83E\uDDDD", color: "#5b3426" },
-  "\uD83E\uDDDB\uD83C\uDFFB": { base: "\uD83E\uDDDB", color: "#f4c6a3" },
-  "\uD83E\uDEC5\uD83C\uDFFB": { base: "\uD83E\uDEC5", color: "#f4c6a3" },
-};
 const EMOJI_TEXT_SEGMENT_REGEX = /(\p{Extended_Pictographic}\uFE0F?)/gu;
 const EMOJI_TEXT_TEST_REGEX = /\p{Extended_Pictographic}\uFE0F?/u;
-const EMOJI_CLUSTER_REGEX = /\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?(?:\u200D(?:\p{Extended_Pictographic}|\u2640|\u2642)(?:\uFE0F|\p{Emoji_Modifier})?)*/uy;
 const EMOJI_SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "CANVAS", "SVG"]);
 let emojiDomObserver = null;
 let emojiDomPassScheduled = false;
 const emojiPendingRoots = new Set();
-let emojiAtlasKeysByLength = [];
-const WINDOWS_1252_REVERSE = {
-  0x20AC: 0x80,
-  0x201A: 0x82,
-  0x0192: 0x83,
-  0x201E: 0x84,
-  0x2026: 0x85,
-  0x2020: 0x86,
-  0x2021: 0x87,
-  0x02C6: 0x88,
-  0x2030: 0x89,
-  0x0160: 0x8A,
-  0x2039: 0x8B,
-  0x0152: 0x8C,
-  0x017D: 0x8E,
-  0x2018: 0x91,
-  0x2019: 0x92,
-  0x201C: 0x93,
-  0x201D: 0x94,
-  0x2022: 0x95,
-  0x2013: 0x96,
-  0x2014: 0x97,
-  0x02DC: 0x98,
-  0x2122: 0x99,
-  0x0161: 0x9A,
-  0x203A: 0x9B,
-  0x0153: 0x9C,
-  0x017E: 0x9E,
-  0x0178: 0x9F,
-};
-const LEGACY_EMOJI_REPLACEMENTS = {
-  emoji14: {
-    "\uD83E\uDDCC": "\uD83D\uDC79",
-    "\uD83E\uDEC5": "\uD83E\uDD34",
-    "\uD83E\uDEC5\uD83C\uDFFB": "\uD83E\uDD34\uD83C\uDFFB",
-  },
-  emoji13: {
-    "\uD83E\uDEA6": "\u271D\uFE0F",
-    "\uD83E\uDEB2": "\uD83D\uDC1E",
-  },
-  emoji12: {
-    "\uD83E\uDE78": "\uD83D\uDCA7",
-    "\uD83E\uDE79": "\uD83D\uDC8A",
-    "\uD83E\uDE90": "\uD83D\uDD2D",
-  },
-  sequences: {
-    "\uD83E\uDDD9\uD83C\uDFFB\u200D\u2642\uFE0F": "\uD83E\uDDD9",
-    "\uD83E\uDDDD\uD83C\uDFFB\u200D\u2642\uFE0F": "\uD83E\uDDDD",
-    "\uD83E\uDDDD\uD83C\uDFFF": "\uD83D\uDC7D",
-    "\uD83E\uDDDB\uD83C\uDFFB": "\uD83E\uDDDB",
-  },
-};
-const emojiCompatibility = {
-  replaceEmoji14: false,
-  replaceEmoji13: false,
-  replaceEmoji12: false,
-  replaceSequences: false,
-  useAtlasSprites: false,
-};
-const EMOJI_SUPPORT_PROBE_GROUPS = {
-  emoji14: ["\uD83E\uDDCC", "\uD83E\uDEC5"],
-  emoji13: ["\uD83E\uDEA6", "\uD83E\uDEB2"],
-  emoji12: ["\uD83E\uDE78", "\uD83E\uDE79", "\uD83E\uDE90"],
-  sequences: [
-    "\uD83E\uDDD9\uD83C\uDFFB\u200D\u2642\uFE0F",
-    "\uD83E\uDDDD\uD83C\uDFFB\u200D\u2642\uFE0F",
-    "\uD83E\uDDDD\uD83C\uDFFF",
-    "\uD83E\uDDDB\uD83C\uDFFB",
-  ],
-};
-
-function shouldUseEmojiAtlasSprites() {
-  return emojiCompatibility.useAtlasSprites === true;
-}
 
 function normalizeEmojiGlyphKey(value) {
   if (!value) {
@@ -186,231 +100,23 @@ function normalizeEmojiGlyphKey(value) {
   return String(value).replace(/\uFE0F/g, "");
 }
 
-function repairMojibakeEmojiKey(value) {
-  if (!value || !/[ÃÂâð]/.test(value)) {
-    return value;
-  }
-  try {
-    const bytes = [];
-    for (const char of String(value)) {
-      const codePoint = char.codePointAt(0);
-      bytes.push(WINDOWS_1252_REVERSE[codePoint] ?? (codePoint <= 255 ? codePoint : 63));
-    }
-    return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes));
-  } catch {
-    return value;
-  }
-}
-
-function getParsedMacOsVersionFromUa() {
-  const match = /\bMac OS X ([0-9_]+)/.exec(navigator.userAgent || "");
-  if (!match) {
-    return null;
-  }
-  const parts = match[1].split("_").map((part) => parseInt(part, 10) || 0);
-  return { major: parts[0] ?? 0, minor: parts[1] ?? 0, patch: parts[2] ?? 0 };
-}
-
-function isMacOsBefore(version, major, minor = 0, patch = 0) {
-  if (!version) {
-    return false;
-  }
-  if (version.major !== major) {
-    return version.major < major;
-  }
-  if (version.minor !== minor) {
-    return version.minor < minor;
-  }
-  return version.patch < patch;
-}
-
-function applyWindowsEmojiCompatibility({ legacyEmoji = false, normalizeSequences = true } = {}) {
-  emojiCompatibility.replaceEmoji14 = legacyEmoji;
-  emojiCompatibility.replaceEmoji13 = legacyEmoji;
-  emojiCompatibility.replaceEmoji12 = legacyEmoji;
-  emojiCompatibility.replaceSequences = normalizeSequences;
-}
-
-function detectLikelyLegacyEmojiSync() {
-  const ua = navigator.userAgent || "";
-  const windowsMatch = /\bWindows NT ([0-9.]+)/.exec(ua);
-  if (windowsMatch) {
-    const version = parseFloat(windowsMatch[1]);
-    applyWindowsEmojiCompatibility({
-      legacyEmoji: version < 10,
-      normalizeSequences: false,
-    });
-    emojiCompatibility.useAtlasSprites = false;
-    return;
-  }
-  const macVersion = getParsedMacOsVersionFromUa();
-  if (macVersion) {
-    emojiCompatibility.replaceEmoji14 = isMacOsBefore(macVersion, 12, 3);
-    emojiCompatibility.replaceEmoji13 = isMacOsBefore(macVersion, 11);
-    emojiCompatibility.replaceEmoji12 = isMacOsBefore(macVersion, 10, 15, 1);
-    emojiCompatibility.replaceSequences = isMacOsBefore(macVersion, 12, 3);
-    emojiCompatibility.useAtlasSprites = false;
-  }
-}
-
-async function detectLegacyEmojiCompatibility() {
-  detectLikelyLegacyEmojiSync();
-  try {
-    if (!navigator.userAgentData) {
-      return;
-    }
-    if (navigator.userAgentData.platform !== "Windows") {
-      return;
-    }
-    const values = await navigator.userAgentData.getHighEntropyValues(["platformVersion"]);
-    const majorPlatformVersion = parseInt(String(values.platformVersion ?? "0").split(".")[0], 10);
-    const hasReliablePlatformVersion = Number.isFinite(majorPlatformVersion) && majorPlatformVersion > 0;
-    applyWindowsEmojiCompatibility({
-      legacyEmoji: hasReliablePlatformVersion && majorPlatformVersion < 13,
-      normalizeSequences: false,
-    });
-    emojiCompatibility.useAtlasSprites = false;
-  } catch {
-    // Keep the synchronous user-agent result when high entropy UA-CH is unavailable.
-  } finally {
-    detectEmojiGlyphFallbackNeeds();
-    refreshDomEmojiSprites(document.body);
-    if (typeof refreshUpgradeEmojiSprites === "function") {
-      refreshUpgradeEmojiSprites(document);
-    }
-  }
-}
-
-function getEmojiProbeSignature(ctx, value) {
-  const size = 48;
-  ctx.clearRect(0, 0, size, size);
-  ctx.fillStyle = "#000000";
-  ctx.font = '32px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(value, size * 0.5, size * 0.56);
-  const data = ctx.getImageData(0, 0, size, size).data;
-  let ink = 0;
-  let colored = 0;
-  let minX = size;
-  let maxX = -1;
-  for (let index = 0; index < data.length; index += 4) {
-    const alpha = data[index + 3];
-    if (alpha <= 16) {
-      continue;
-    }
-    const pixel = index / 4;
-    const x = pixel % size;
-    const red = data[index];
-    const green = data[index + 1];
-    const blue = data[index + 2];
-    ink += 1;
-    minX = Math.min(minX, x);
-    maxX = Math.max(maxX, x);
-    if (Math.max(red, green, blue) - Math.min(red, green, blue) > 26) {
-      colored += 1;
-    }
-  }
-  return { ink, colored, width: maxX >= minX ? maxX - minX + 1 : 0 };
-}
-
-function emojiLooksUnsupported(ctx, value) {
-  const tofu = getEmojiProbeSignature(ctx, "\u25A1");
-  const unknown = getEmojiProbeSignature(ctx, "\uFFFD");
-  const sample = getEmojiProbeSignature(ctx, value);
-  if (sample.ink <= 0) {
-    return true;
-  }
-  const sampleLooksMono = sample.colored < Math.max(8, sample.ink * 0.015);
-  const tofuLikeInk = Math.abs(sample.ink - tofu.ink) <= Math.max(18, tofu.ink * 0.16);
-  const unknownLikeInk = Math.abs(sample.ink - unknown.ink) <= Math.max(18, unknown.ink * 0.16);
-  const tooWideSequence = Array.from(value).length > 2 && sample.width > 42;
-  return (sampleLooksMono && (tofuLikeInk || unknownLikeInk)) || tooWideSequence;
-}
-
-function detectEmojiGlyphFallbackNeeds() {
-  if (typeof document === "undefined") {
-    return;
-  }
-  const ua = navigator.userAgent || "";
-  const shouldProbe = /\bWindows NT 10\.0\b/.test(ua) && !navigator.userAgentData;
-  if (!shouldProbe) {
-    return;
-  }
-  const canvas = document.createElement("canvas");
-  canvas.width = 48;
-  canvas.height = 48;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) {
-    return;
-  }
-  emojiCompatibility.replaceEmoji14 ||= EMOJI_SUPPORT_PROBE_GROUPS.emoji14.some((emoji) => emojiLooksUnsupported(ctx, emoji));
-  emojiCompatibility.replaceEmoji13 ||= EMOJI_SUPPORT_PROBE_GROUPS.emoji13.some((emoji) => emojiLooksUnsupported(ctx, emoji));
-  emojiCompatibility.replaceEmoji12 ||= EMOJI_SUPPORT_PROBE_GROUPS.emoji12.some((emoji) => emojiLooksUnsupported(ctx, emoji));
-  emojiCompatibility.replaceSequences ||= EMOJI_SUPPORT_PROBE_GROUPS.sequences.some((emoji) => emojiLooksUnsupported(ctx, emoji));
-}
-
-function getDisplayEmoji(emoji) {
-  const value = String(emoji ?? "");
-  const repaired = repairMojibakeEmojiKey(value);
-  return (emojiCompatibility.replaceSequences ? LEGACY_EMOJI_REPLACEMENTS.sequences[value] ?? LEGACY_EMOJI_REPLACEMENTS.sequences[repaired] : null)
-    ?? (emojiCompatibility.replaceEmoji14 ? LEGACY_EMOJI_REPLACEMENTS.emoji14[value] ?? LEGACY_EMOJI_REPLACEMENTS.emoji14[repaired] : null)
-    ?? (emojiCompatibility.replaceEmoji13 ? LEGACY_EMOJI_REPLACEMENTS.emoji13[value] ?? LEGACY_EMOJI_REPLACEMENTS.emoji13[repaired] : null)
-    ?? (emojiCompatibility.replaceEmoji12 ? LEGACY_EMOJI_REPLACEMENTS.emoji12[value] ?? LEGACY_EMOJI_REPLACEMENTS.emoji12[repaired] : null)
-    ?? value;
-}
-
-function getEmojiAtlasKeys(emoji) {
-  const value = String(emoji ?? "");
-  const repaired = repairMojibakeEmojiKey(value);
-  const noTone = repaired.replace(/[\u{1F3FB}-\u{1F3FF}]/gu, "");
-  const noGender = noTone.replace(/\u200D[\u2640\u2642]\uFE0F?/g, "");
-  return [
-    value,
-    repaired,
-    normalizeEmojiGlyphKey(repaired),
-    noTone,
-    normalizeEmojiGlyphKey(noTone),
-    noGender,
-    normalizeEmojiGlyphKey(noGender),
-  ].filter(Boolean);
-}
-
 async function initWin11EmojiAtlas() {
   if (EMOJI_ATLAS.requested || EMOJI_ATLAS.ready || EMOJI_ATLAS.failed) {
     return;
   }
   EMOJI_ATLAS.requested = true;
   try {
-    let atlasData = window.WIN11_EMOJI_ATLAS_DATA ?? null;
-    if (!atlasData) {
-      const response = await fetch("assets/win11-emoji-atlas.json", { cache: "force-cache" });
-      if (!response.ok) {
-        throw new Error(`emoji atlas json ${response.status}`);
-      }
-      const atlasText = await response.text();
-      atlasData = JSON.parse(atlasText.replace(/^\uFEFF/, ""));
+    const response = await fetch("assets/win11-emoji-atlas.json", { cache: "force-cache" });
+    if (!response.ok) {
+      throw new Error(`emoji atlas json ${response.status}`);
     }
+    const atlasData = await response.json();
     const image = new Image();
     image.src = EMOJI_ATLAS.url;
     await image.decode();
     EMOJI_ATLAS.image = image;
-    const sourceMap = atlasData.map ?? {};
-    EMOJI_ATLAS.map = {};
-    for (const [key, entry] of Object.entries(sourceMap)) {
-      for (const atlasKey of getEmojiAtlasKeys(key)) {
-        EMOJI_ATLAS.map[atlasKey] = entry;
-      }
-    }
+    EMOJI_ATLAS.map = atlasData.map ?? {};
     EMOJI_ATLAS.cellSize = atlasData.cellSize ?? 64;
-    emojiAtlasKeysByLength = [
-      ...Object.keys(EMOJI_ATLAS.map),
-      ...Object.keys(SKIN_TONE_EMOJI_SPRITES),
-      ...Object.keys(SKIN_TONE_EMOJI_SPRITES).map(repairMojibakeEmojiKey),
-    ]
-      .filter(Boolean)
-      .filter((key, index, keys) => keys.indexOf(key) === index)
-      .sort((a, b) => b.length - a.length);
     EMOJI_ATLAS.ready = true;
     refreshDomEmojiSprites(document.body);
     if (typeof refreshUpgradeEmojiSprites === "function") {
@@ -423,85 +129,28 @@ async function initWin11EmojiAtlas() {
 }
 
 function getEmojiAtlasEntry(emoji) {
-  if (!shouldUseEmojiAtlasSprites() || !EMOJI_ATLAS.ready || !EMOJI_ATLAS.map || !emoji) {
+  if (!EMOJI_ATLAS.ready || !EMOJI_ATLAS.map || !emoji) {
     return null;
   }
-  for (const key of getEmojiAtlasKeys(emoji)) {
-    if (EMOJI_ATLAS.map[key]) {
-      return EMOJI_ATLAS.map[key];
-    }
-  }
-  for (const key of getEmojiAtlasKeys(getDisplayEmoji(emoji))) {
-    if (EMOJI_ATLAS.map[key]) {
-      return EMOJI_ATLAS.map[key];
-    }
-  }
-  return null;
-}
-
-function getCustomEmojiSprite(emoji) {
-  if (!shouldUseEmojiAtlasSprites() || !EMOJI_ATLAS.ready || !EMOJI_ATLAS.image || !emoji) {
-    return null;
-  }
-  const value = String(emoji);
-  const repaired = repairMojibakeEmojiKey(value);
-  const spec = SKIN_TONE_EMOJI_SPRITES[value] ?? SKIN_TONE_EMOJI_SPRITES[repaired];
-  if (!spec) {
-    return null;
-  }
-  const cacheKey = repaired || value;
-  if (EMOJI_CUSTOM_SPRITE_CACHE.has(cacheKey)) {
-    return EMOJI_CUSTOM_SPRITE_CACHE.get(cacheKey);
-  }
-  const baseEntry = getEmojiAtlasEntry(spec.base);
-  if (!baseEntry) {
-    return null;
-  }
-  const canvas = document.createElement("canvas");
-  const size = EMOJI_ATLAS.cellSize;
-  canvas.width = size;
-  canvas.height = size;
-  const spriteCtx = canvas.getContext("2d");
-  if (!spriteCtx) {
-    return null;
-  }
-  spriteCtx.imageSmoothingEnabled = false;
-  spriteCtx.drawImage(EMOJI_ATLAS.image, baseEntry.x, baseEntry.y, baseEntry.w, baseEntry.h, 0, 0, size, size);
-  spriteCtx.save();
-  spriteCtx.globalCompositeOperation = "source-atop";
-  spriteCtx.globalAlpha = 0.48;
-  spriteCtx.fillStyle = spec.color;
-  spriteCtx.beginPath();
-  spriteCtx.ellipse(size * 0.5, size * 0.42, size * 0.22, size * 0.24, 0, 0, Math.PI * 2);
-  spriteCtx.fill();
-  spriteCtx.restore();
-  const custom = { image: canvas, x: 0, y: 0, w: size, h: size, color: spec.color, baseEntry };
-  EMOJI_CUSTOM_SPRITE_CACHE.set(cacheKey, custom);
-  return custom;
+  return EMOJI_ATLAS.map[emoji] ?? EMOJI_ATLAS.map[normalizeEmojiGlyphKey(emoji)] ?? null;
 }
 
 function drawEmojiSprite(emoji, centerX, centerY, size, options = {}) {
-  if (!shouldUseEmojiAtlasSprites()) {
-    return false;
-  }
-  const customSprite = getCustomEmojiSprite(emoji);
-  const entry = customSprite ?? getEmojiAtlasEntry(emoji);
-  const image = customSprite?.image ?? EMOJI_ATLAS.image;
-  if (!entry || !image) {
+  const entry = getEmojiAtlasEntry(emoji);
+  if (!entry || !EMOJI_ATLAS.image) {
     return false;
   }
   const alpha = options.alpha ?? 1;
   const shadowBlur = options.shadowBlur ?? 0;
   const shadowColor = options.shadowColor ?? "transparent";
   ctx.save();
-  ctx.imageSmoothingEnabled = false;
   ctx.globalAlpha *= alpha;
   if (shadowBlur > 0) {
     ctx.shadowBlur = shadowBlur;
     ctx.shadowColor = shadowColor;
   }
   ctx.drawImage(
-    image,
+    EMOJI_ATLAS.image,
     entry.x,
     entry.y,
     entry.w,
@@ -519,41 +168,18 @@ function applyEmojiSpriteToElement(element, emoji, sizePx) {
   if (!element) {
     return;
   }
-  if (!shouldUseEmojiAtlasSprites()) {
-    element.classList.remove("is-emoji-sprite");
-    element.style.removeProperty("--emoji-size");
-    element.style.removeProperty("background-image");
-    element.style.removeProperty("background-size");
-    element.style.removeProperty("background-position");
-    element.textContent = getDisplayEmoji(emoji);
-    return;
-  }
-  const customSprite = getCustomEmojiSprite(emoji);
-  const displayEmoji = customSprite ? String(emoji ?? "") : getDisplayEmoji(emoji);
-  element.textContent = displayEmoji;
-  const entry = customSprite ?? getEmojiAtlasEntry(emoji);
-  const image = customSprite?.image ?? EMOJI_ATLAS.image;
-  if (!entry || !image) {
+  const entry = getEmojiAtlasEntry(emoji);
+  if (!entry || !EMOJI_ATLAS.image) {
     element.classList.remove("is-emoji-sprite");
     return;
   }
-  const imageWidth = image.naturalWidth || image.width || (EMOJI_ATLAS.cellSize * 10);
-  const imageHeight = image.naturalHeight || image.height || (EMOJI_ATLAS.cellSize * 10);
-  const scale = sizePx / Math.max(1, EMOJI_ATLAS.cellSize);
+  const imageWidth = EMOJI_ATLAS.image.naturalWidth || (EMOJI_ATLAS.cellSize * 10);
+  const imageHeight = EMOJI_ATLAS.image.naturalHeight || (EMOJI_ATLAS.cellSize * 10);
   element.classList.add("is-emoji-sprite");
   element.style.setProperty("--emoji-size", `${sizePx}px`);
-  if (customSprite) {
-    const atlasWidth = EMOJI_ATLAS.image?.naturalWidth || EMOJI_ATLAS.image?.width || (EMOJI_ATLAS.cellSize * 10);
-    const atlasHeight = EMOJI_ATLAS.image?.naturalHeight || EMOJI_ATLAS.image?.height || (EMOJI_ATLAS.cellSize * 10);
-    const baseEntry = customSprite.baseEntry ?? entry;
-    element.style.backgroundImage = `radial-gradient(ellipse at 50% 42%, ${customSprite.color} 0 21%, transparent 24%), url("${EMOJI_ATLAS.url}")`;
-    element.style.backgroundSize = `${sizePx}px ${sizePx}px, ${atlasWidth * scale}px ${atlasHeight * scale}px`;
-    element.style.backgroundPosition = `0 0, ${-baseEntry.x * scale}px ${-baseEntry.y * scale}px`;
-  } else {
-    element.style.backgroundImage = `url("${EMOJI_ATLAS.url}")`;
-    element.style.backgroundSize = `${imageWidth * scale}px ${imageHeight * scale}px`;
-    element.style.backgroundPosition = `${-entry.x * scale}px ${-entry.y * scale}px`;
-  }
+  element.style.backgroundImage = `url("${EMOJI_ATLAS.url}")`;
+  element.style.backgroundSize = `${imageWidth}px ${imageHeight}px`;
+  element.style.backgroundPosition = `${-entry.x}px ${-entry.y}px`;
 }
 
 function isEmojiTextNodeCandidate(textNode) {
@@ -577,100 +203,38 @@ function getEmojiInlineSizePx(element) {
   return Math.max(12, Math.round(fontSize * 1.15));
 }
 
-function tokenizeEmojiText(text) {
-  const tokens = [];
-  let index = 0;
-  while (index < text.length) {
-    let matched = "";
-    for (const key of emojiAtlasKeysByLength) {
-      const normalizedKey = normalizeEmojiGlyphKey(key);
-      if (text.startsWith(key, index)) {
-        matched = text.slice(index, index + key.length);
-        break;
-      }
-      if (normalizedKey && text.startsWith(normalizedKey, index)) {
-        matched = text.slice(index, index + normalizedKey.length);
-        break;
-      }
-    }
-    if (matched) {
-      tokens.push({ type: "emoji", value: matched });
-      index += matched.length;
-      continue;
-    }
-    EMOJI_CLUSTER_REGEX.lastIndex = index;
-    const cluster = EMOJI_CLUSTER_REGEX.exec(text)?.[0] ?? "";
-    if (cluster) {
-      tokens.push({ type: "emoji", value: cluster });
-      index += cluster.length;
-      continue;
-    }
-    const codePoint = text.codePointAt(index);
-    const char = String.fromCodePoint(codePoint);
-    tokens.push({ type: "text", value: char });
-    index += char.length;
-  }
-  const merged = [];
-  for (const token of tokens) {
-    const previous = merged[merged.length - 1];
-    if (previous && previous.type === token.type && token.type === "text") {
-      previous.value += token.value;
-    } else {
-      merged.push(token);
-    }
-  }
-  return merged;
-}
-
 function convertEmojiTextNode(textNode) {
-  if (!shouldUseEmojiAtlasSprites()) {
-    const currentText = textNode?.nodeValue ?? "";
-    const displayText = tokenizeEmojiText(currentText)
-      .map((part) => part.type === "emoji" ? getDisplayEmoji(part.value) : part.value)
-      .join("");
-    if (displayText !== currentText) {
-      textNode.nodeValue = displayText;
-      return true;
-    }
-    return false;
-  }
   if (!isEmojiTextNodeCandidate(textNode)) {
     return false;
   }
   const text = textNode.nodeValue ?? "";
-  const parts = tokenizeEmojiText(text);
-  if (!parts.some((part) => part.type === "emoji")) {
+  const parts = text.split(EMOJI_TEXT_SEGMENT_REGEX);
+  if (parts.length <= 1) {
     return false;
   }
   const fragment = document.createDocumentFragment();
   for (const part of parts) {
-    if (!part.value) {
+    if (!part) {
       continue;
     }
-    if (part.type === "emoji") {
+    if (EMOJI_TEXT_TEST_REGEX.test(part)) {
       const emojiSpan = document.createElement("span");
       emojiSpan.className = "emoji-inline-sprite";
-      emojiSpan.dataset.rawEmoji = part.value;
-      emojiSpan.textContent = getDisplayEmoji(part.value);
-      applyEmojiSpriteToElement(emojiSpan, part.value, getEmojiInlineSizePx(emojiSpan));
+      emojiSpan.textContent = part;
+      applyEmojiSpriteToElement(emojiSpan, part, getEmojiInlineSizePx(emojiSpan));
       fragment.appendChild(emojiSpan);
       continue;
     }
-    fragment.appendChild(document.createTextNode(part.value));
+    fragment.appendChild(document.createTextNode(part));
   }
   textNode.parentNode?.replaceChild(fragment, textNode);
   return true;
 }
 
 function refreshDomEmojiSprites(root) {
+  return;
   if (!root) {
     return;
-  }
-  if (!shouldUseEmojiAtlasSprites() && root.querySelectorAll) {
-    const emojiSpans = root.querySelectorAll(".emoji-inline-sprite");
-    for (const emojiSpan of emojiSpans) {
-      emojiSpan.replaceWith(document.createTextNode(getDisplayEmoji(emojiSpan.dataset.rawEmoji ?? emojiSpan.textContent)));
-    }
   }
   if (root.nodeType === Node.TEXT_NODE) {
     convertEmojiTextNode(root);
@@ -691,7 +255,7 @@ function refreshDomEmojiSprites(root) {
   if (root.querySelectorAll) {
     const emojiSpans = root.querySelectorAll(".emoji-inline-sprite");
     for (const emojiSpan of emojiSpans) {
-      applyEmojiSpriteToElement(emojiSpan, emojiSpan.dataset.rawEmoji ?? emojiSpan.textContent, getEmojiInlineSizePx(emojiSpan));
+      applyEmojiSpriteToElement(emojiSpan, emojiSpan.textContent, getEmojiInlineSizePx(emojiSpan));
     }
   }
 }
@@ -720,10 +284,10 @@ function scheduleEmojiDomRefresh(root) {
 }
 
 function startGlobalEmojiSpriteSync() {
+  return;
   if (emojiDomObserver) {
     return;
   }
-  detectLegacyEmojiCompatibility();
   refreshDomEmojiSprites(document.body);
   emojiDomObserver = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
@@ -3110,9 +2674,6 @@ function getEligibleBossTypes(atTime = state?.elapsed ?? 0) {
     if ((state?.bossDefeats?.[type] ?? 0) >= 3) {
       return false;
     }
-    if (type === "colossus" && (state?.bossDirector?.encounterIndex ?? 0) <= 0) {
-      return false;
-    }
     return atTime >= (BOSS_UNLOCK_TIMES[type] ?? 0);
   });
 }
@@ -3130,7 +2691,6 @@ let terrainRenderCache = {
   waterTiles: [],
   lastRebuildStartX: null,
   lastRebuildStartY: null,
-  visibleChunks: [],
 };
 
 let metaProgress;
